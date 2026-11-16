@@ -1,0 +1,22 @@
+# Lakshmi Physio - Docker Compose (server 156.67.104.242)
+# Containers bind to 127.0.0.1 only; host nginx (deploy/nginx-site.conf) terminates TLS:
+#   /api/ -> 127.0.0.1:5170 (backend)
+#   /     -> 127.0.0.1:3170 (frontend)
+services:
+  backend:
+    build: ./backend
+    container_name: lakshmiphysio-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    ports:
+      - "127.0.0.1:5170:5000"
+
+  frontend:
+    build: ./frontend
+    container_name: lakshmiphysio-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "127.0.0.1:3170:80"
