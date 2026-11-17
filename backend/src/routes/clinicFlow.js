@@ -120,6 +120,40 @@ router.post('/visits', h(async (req, res) => {
   res.json(out);
 }));
 
+// The assessment recorded for a booking (to edit it again from the Confirm Patient List).
+router.get('/visits/by-booking/:bookingId', h(async (req, res) => {
+  const [v] = await query('SELECT TOP 1 * FROM Visit WHERE BookingId=@b ORDER BY VisitId DESC', { b: Number(req.params.bookingId) });
+  if (!v) throw bad('No assessment recorded for this booking', 404);
+  const treatments = await query('SELECT * FROM VisitTreatment WHERE VisitId=@v ORDER BY VisitTreatmentId', { v: v.VisitId });
+  res.json({ ...v, treatments });
+}));
+
+// Update an assessment: notes, follow-up, fee and the treatment list (replaced). Not once it is billed.
+router.put('/visits/:id', h(async (req, res) => {
+  const id = Number(req.params.id);
+  const b = req.body || {};
+  const treatments = Array.isArray(b.treatments) ? b.treatments : [];
+  const treatmentFee = treatments.reduce((s, t) => s + num(t.Fee), 0);
+  await withTransaction(async (tx) => {
+    const [v] = await query('SELECT IsBilled, BookingId FROM Visit WITH (UPDLOCK) WHERE VisitId=@id', { id }, tx);
+    if (!v) throw bad('Assessment not found', 404);
+    if (v.IsBilled) throw bad('This visit is already billed and cannot be changed');
+    await query(`UPDATE Visit SET AssessmentNotes=@n, FollowUpDate=@fu, DoctorFee=@df, TreatmentFee=@tf WHERE VisitId=@id`, {
+      id, n: nz(b.AssessmentNotes), fu: nz(b.FollowUpDate) || null, df: num(b.DoctorFee), tf: treatmentFee,
+    }, tx);
+    await query('DELETE FROM VisitTreatment WHERE VisitId=@id', { id }, tx);
+    for (const t of treatments) {
+      await query(`INSERT INTO VisitTreatment (VisitId, TreatmentId, TreatmentName, Exercise, Fee)
+        VALUES (@v, @tid, @n, @e, @f)`, {
+        v: id, tid: t.TreatmentId ? Number(t.TreatmentId) : null, n: String(t.TreatmentName || ''),
+        e: nz(t.Exercise), f: num(t.Fee),
+      }, tx);
+    }
+    if (v.BookingId) await query(`UPDATE Booking SET Status='Examined' WHERE BookingId=@b AND Status='Confirmed'`, { b: v.BookingId }, tx);
+  });
+  res.json({ ok: true });
+}));
+
 /* ---------- Patient History (visit-wise) ---------- */
 router.get('/visits', h(async (req, res) => {
   const { patientId } = req.query;

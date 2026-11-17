@@ -232,3 +232,11 @@
   .animate-fade-in { animation: none !important; opacity: 1 !important; transform: none !important; }
   @page { size: A5; margin: 10mm; }
 }
+
+/* Smaller text throughout one screen (the Patient Assessment form): wrap it in .form-compact.
+   Each size steps down about one notch; rem-based, so it still follows the root size. */
+.form-compact .text-base { font-size: 0.8889rem; line-height: 1.25rem; }
+.form-compact .text-sm { font-size: 0.75rem; line-height: 1.1rem; }
+.form-compact .text-13, .form-compact .input, .form-compact .btn { font-size: 0.6667rem; }
+.form-compact .text-xs, .form-compact .label { font-size: 0.6389rem; line-height: 0.95rem; }
+.form-compact .input { min-height: 28px; line-height: 20px; }
