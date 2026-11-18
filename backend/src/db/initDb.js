@@ -149,6 +149,20 @@ CREATE TABLE VisitTreatment (
     CONSTRAINT FK_VisitTreatment_Visit FOREIGN KEY (VisitId) REFERENCES Visit(VisitId) ON DELETE CASCADE
 );
 
+-- Follow-up schedule: one row per date the doctor asked the patient to come back
+-- (e.g. alternate days for a week). Visit.FollowUpDate keeps the first of these.
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='VisitFollowUp' AND xtype='U')
+BEGIN
+CREATE TABLE VisitFollowUp (
+    VisitFollowUpId INT IDENTITY(1,1) PRIMARY KEY,
+    VisitId         INT NOT NULL,
+    FollowUpDate    DATE NOT NULL,
+    CONSTRAINT FK_VisitFollowUp_Visit FOREIGN KEY (VisitId) REFERENCES Visit(VisitId) ON DELETE CASCADE,
+    CONSTRAINT UQ_VisitFollowUp UNIQUE (VisitId, FollowUpDate)
+);
+INSERT INTO VisitFollowUp (VisitId, FollowUpDate) SELECT VisitId, FollowUpDate FROM Visit WHERE FollowUpDate IS NOT NULL;
+END
+
 IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Bill' AND xtype='U')
 CREATE TABLE Bill (
     BillId        INT IDENTITY(1,1) PRIMARY KEY,

@@ -50,22 +50,32 @@ router.put('/bookings/:id/cancel', h(async (req, res) => {
 }));
 
 /* ---------- Follow-up patients ---------- */
+// One row per scheduled follow-up date of each patient's latest visit.
+// A date counts as Confirmed when the patient has a booking on it or before the next scheduled date.
 router.get('/follow-ups', h(async (req, res) => {
   const { from, to } = req.query;
   res.json(await query(`
-    SELECT v.VisitId, v.VisitDate, v.FollowUpDate, v.AssessmentNotes, v.PatientId,
+    WITH fu AS (
+      SELECT VisitFollowUpId, VisitId, FollowUpDate,
+             LEAD(FollowUpDate) OVER (PARTITION BY VisitId ORDER BY FollowUpDate) AS NextDate,
+             ROW_NUMBER() OVER (PARTITION BY VisitId ORDER BY FollowUpDate) AS SessionNo,
+             COUNT(*) OVER (PARTITION BY VisitId) AS Sessions
+      FROM VisitFollowUp)
+    SELECT fu.VisitFollowUpId, fu.FollowUpDate, fu.SessionNo, fu.Sessions,
+           v.VisitId, v.VisitDate, v.AssessmentNotes, v.PatientId,
            p.PatientCode, p.Name AS PatientName, p.MobileNo, v.DoctorId, e.Name AS DoctorName,
            CASE WHEN EXISTS (SELECT 1 FROM Booking b WHERE b.PatientId=v.PatientId AND b.Status<>'Cancelled'
-                              AND CAST(b.ConfirmTime AS DATE) >= v.FollowUpDate) THEN 'Confirmed'
-                WHEN v.FollowUpDate < CAST(GETDATE() AS DATE) THEN 'Missed'
+                              AND CAST(b.ConfirmTime AS DATE) >= fu.FollowUpDate
+                              AND (fu.NextDate IS NULL OR CAST(b.ConfirmTime AS DATE) < fu.NextDate)) THEN 'Confirmed'
+                WHEN fu.FollowUpDate < CAST(GETDATE() AS DATE) THEN 'Missed'
                 ELSE 'Pending' END AS FollowUpStatus
-    FROM Visit v
+    FROM fu
+    JOIN Visit v ON v.VisitId=fu.VisitId
     JOIN Patient p ON p.PatientId=v.PatientId
     LEFT JOIN Employee e ON e.EmployeeId=v.DoctorId
-    WHERE v.FollowUpDate IS NOT NULL
-      AND (@f IS NULL OR v.FollowUpDate >= @f) AND (@t IS NULL OR v.FollowUpDate <= @t)
+    WHERE (@f IS NULL OR fu.FollowUpDate >= @f) AND (@t IS NULL OR fu.FollowUpDate <= @t)
       AND NOT EXISTS (SELECT 1 FROM Visit v2 WHERE v2.PatientId=v.PatientId AND v2.VisitId>v.VisitId)
-    ORDER BY v.FollowUpDate, p.Name`, { f: nz(from) || null, t: nz(to) || null }));
+    ORDER BY fu.FollowUpDate, p.Name`, { f: nz(from) || null, t: nz(to) || null }));
 }));
 
 /* ---------- Treatment master ---------- */
@@ -91,11 +101,31 @@ router.delete('/treatments/:id', h(async (req, res) => {
 }));
 
 /* ---------- Examine ---------- */
+// Follow-up dates from the form: FollowUpDates (list) or the older single FollowUpDate.
+function followUpDates(b) {
+  const list = Array.isArray(b.FollowUpDates) ? b.FollowUpDates : (b.FollowUpDate ? [b.FollowUpDate] : []);
+  const out = [...new Set(list.filter(Boolean).map((d) => String(d).slice(0, 10)))].sort();
+  if (out.some((d) => !/^\d{4}-\d{2}-\d{2}$/.test(d))) throw bad('Invalid follow-up date');
+  if (out.length > 90) throw bad('Too many follow-up dates');
+  return out;
+}
+
+async function saveFollowUps(visitId, dates, tx) {
+  await query('DELETE FROM VisitFollowUp WHERE VisitId=@v', { v: visitId }, tx);
+  for (const d of dates) await query('INSERT INTO VisitFollowUp (VisitId, FollowUpDate) VALUES (@v, @d)', { v: visitId, d }, tx);
+}
+
+const followUpsOf = async (visitIds) => (visitIds.length
+  ? query(`SELECT VisitId, CONVERT(CHAR(10), FollowUpDate, 23) AS D FROM VisitFollowUp
+      WHERE VisitId IN (SELECT value FROM STRING_SPLIT(@ids, ',')) ORDER BY FollowUpDate`, { ids: visitIds.join(',') })
+  : []);
+
 router.post('/visits', h(async (req, res) => {
   const b = req.body || {};
   if (!b.PatientId) throw bad('Select a patient');
   const treatments = Array.isArray(b.treatments) ? b.treatments : [];
   const treatmentFee = treatments.reduce((s, t) => s + num(t.Fee), 0);
+  const dates = followUpDates(b);
   const out = await withTransaction(async (tx) => {
     if (b.BookingId) {
       const [bk] = await query('SELECT Status FROM Booking WITH (UPDLOCK) WHERE BookingId=@id', { id: Number(b.BookingId) }, tx);
@@ -105,8 +135,9 @@ router.post('/visits', h(async (req, res) => {
     const [v] = await query(`INSERT INTO Visit (BookingId, PatientId, DoctorId, AssessmentNotes, FollowUpDate, DoctorFee, TreatmentFee, CreatedBy)
       OUTPUT INSERTED.VisitId VALUES (@b, @p, @d, @n, @fu, @df, @tf, @u)`, {
       b: b.BookingId ? Number(b.BookingId) : null, p: Number(b.PatientId), d: b.DoctorId ? Number(b.DoctorId) : null,
-      n: nz(b.AssessmentNotes), fu: nz(b.FollowUpDate) || null, df: num(b.DoctorFee), tf: treatmentFee, u: req.user.userName,
+      n: nz(b.AssessmentNotes), fu: dates[0] || null, df: num(b.DoctorFee), tf: treatmentFee, u: req.user.userName,
     }, tx);
+    await saveFollowUps(v.VisitId, dates, tx);
     for (const t of treatments) {
       await query(`INSERT INTO VisitTreatment (VisitId, TreatmentId, TreatmentName, Exercise, Fee)
         VALUES (@v, @tid, @n, @e, @f)`, {
@@ -125,7 +156,8 @@ router.get('/visits/by-booking/:bookingId', h(async (req, res) => {
   const [v] = await query('SELECT TOP 1 * FROM Visit WHERE BookingId=@b ORDER BY VisitId DESC', { b: Number(req.params.bookingId) });
   if (!v) throw bad('No assessment recorded for this booking', 404);
   const treatments = await query('SELECT * FROM VisitTreatment WHERE VisitId=@v ORDER BY VisitTreatmentId', { v: v.VisitId });
-  res.json({ ...v, treatments });
+  const fus = await followUpsOf([v.VisitId]);
+  res.json({ ...v, treatments, FollowUpDates: fus.map((x) => x.D) });
 }));
 
 // Update an assessment: notes, follow-up, fee and the treatment list (replaced). Not once it is billed.
@@ -134,13 +166,15 @@ router.put('/visits/:id', h(async (req, res) => {
   const b = req.body || {};
   const treatments = Array.isArray(b.treatments) ? b.treatments : [];
   const treatmentFee = treatments.reduce((s, t) => s + num(t.Fee), 0);
+  const dates = followUpDates(b);
   await withTransaction(async (tx) => {
     const [v] = await query('SELECT IsBilled, BookingId FROM Visit WITH (UPDLOCK) WHERE VisitId=@id', { id }, tx);
     if (!v) throw bad('Assessment not found', 404);
     if (v.IsBilled) throw bad('This visit is already billed and cannot be changed');
     await query(`UPDATE Visit SET AssessmentNotes=@n, FollowUpDate=@fu, DoctorFee=@df, TreatmentFee=@tf WHERE VisitId=@id`, {
-      id, n: nz(b.AssessmentNotes), fu: nz(b.FollowUpDate) || null, df: num(b.DoctorFee), tf: treatmentFee,
+      id, n: nz(b.AssessmentNotes), fu: dates[0] || null, df: num(b.DoctorFee), tf: treatmentFee,
     }, tx);
+    await saveFollowUps(id, dates, tx);
     await query('DELETE FROM VisitTreatment WHERE VisitId=@id', { id }, tx);
     for (const t of treatments) {
       await query(`INSERT INTO VisitTreatment (VisitId, TreatmentId, TreatmentName, Exercise, Fee)
@@ -166,7 +200,12 @@ router.get('/visits', h(async (req, res) => {
     WHERE v.PatientId=@p ORDER BY v.VisitDate DESC`, { p: Number(patientId) });
   const items = visits.length ? await query(`SELECT vt.* FROM VisitTreatment vt
     JOIN Visit v ON v.VisitId=vt.VisitId WHERE v.PatientId=@p`, { p: Number(patientId) }) : [];
-  res.json(visits.map((v) => ({ ...v, treatments: items.filter((i) => i.VisitId === v.VisitId) })));
+  const fus = await followUpsOf(visits.map((v) => v.VisitId));
+  res.json(visits.map((v) => ({
+    ...v,
+    treatments: items.filter((i) => i.VisitId === v.VisitId),
+    FollowUpDates: fus.filter((x) => x.VisitId === v.VisitId).map((x) => x.D),
+  })));
 }));
 
 /* ---------- Billing ---------- */
@@ -237,7 +276,7 @@ router.get('/dashboard', h(async (req, res) => {
       (SELECT COUNT(*) FROM Booking WHERE CAST(ConfirmTime AS DATE)=@today AND Status<>'Cancelled') AS TodayConfirmed,
       (SELECT COUNT(*) FROM Booking WHERE CAST(ConfirmTime AS DATE)=@today AND Status='Confirmed') AS Waiting,
       (SELECT COUNT(*) FROM Visit WHERE CAST(VisitDate AS DATE)=@today) AS Examined,
-      (SELECT COUNT(*) FROM Visit v WHERE v.FollowUpDate=@today
+      (SELECT COUNT(*) FROM VisitFollowUp f JOIN Visit v ON v.VisitId=f.VisitId WHERE f.FollowUpDate=@today
          AND NOT EXISTS (SELECT 1 FROM Visit v2 WHERE v2.PatientId=v.PatientId AND v2.VisitId>v.VisitId)) AS FollowUpsToday,
       (SELECT ISNULL(SUM(NetAmount),0) FROM Bill WHERE CAST(BillDate AS DATE)=@today) AS TodayCollection,
       (SELECT COUNT(*) FROM Visit WHERE IsBilled=0) AS PendingBills`);

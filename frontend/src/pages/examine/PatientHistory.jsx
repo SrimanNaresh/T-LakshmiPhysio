@@ -5,6 +5,42 @@ import api from '../../lib/api';
 import { fDate, fTime, money } from '../../lib/fmt';
 import { Badge, Button, Card, Field, Input, PageHeader, Table } from '../../components/ui';
 
+// Visit-wise timeline, newest first. Used on this page and in the Examine screen's history popup.
+export function VisitTimeline({ visits }) {
+  return (
+    visits.length === 0 ? <p className="py-10 text-center text-ink-400">No visits recorded yet</p> : (
+      <ol className="relative space-y-4 border-l-2 border-brand-200 pl-6">
+        {visits.map((v, i) => (
+          <li key={v.VisitId} className="relative">
+            <span className="absolute -left-[33px] top-3 grid h-6 w-6 place-items-center rounded-full bg-brand-600 text-[11px] font-semibold text-white">{visits.length - i}</span>
+            <div className="rounded-xl border border-ink-200 bg-white p-4 shadow-sm">
+              <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                <span className="flex items-center gap-1.5 font-semibold text-ink-800"><CalendarDays size={15} /> {fDate(v.VisitDate)} <span className="font-normal text-ink-400">{fTime(v.VisitDate)}</span></span>
+                {v.DoctorName && <span className="flex items-center gap-1 text-ink-500"><Stethoscope size={14} />{v.DoctorName}</span>}
+                {v.FollowUpDates?.length > 0 && <span className="flex items-center gap-1 text-ink-500"><Repeat size={14} />Follow-up {v.FollowUpDates.map(fDate).join(', ')}</span>}
+                <span className="ml-auto">{v.BillNo ? <Badge color="green"><Receipt size={11} className="mr-1 inline" />{v.BillNo} · {money(v.NetAmount)}</Badge> : <Badge color="amber">Not billed</Badge>}</span>
+              </div>
+              <div className="whitespace-pre-wrap text-sm text-ink-700">{v.AssessmentNotes || <i className="text-ink-400">No assessment notes</i>}</div>
+              {v.treatments.length > 0 && (
+                <div className="mt-3 overflow-hidden rounded-lg border border-ink-100">
+                  <table className="w-full text-sm">
+                    <tbody className="divide-y divide-ink-100">
+                      {v.treatments.map((t) => (
+                        <tr key={t.VisitTreatmentId}><td className="px-3 py-1.5 font-medium">{t.TreatmentName}</td><td className="px-3 py-1.5 text-ink-500">{t.Exercise}</td><td className="px-3 py-1.5 text-right">{money(t.Fee)}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <div className="mt-2 text-right text-xs text-ink-500">Doctor fee {money(v.DoctorFee)} · Treatment {money(v.TreatmentFee)}</div>
+            </div>
+          </li>
+        ))}
+      </ol>
+    )
+  );
+}
+
 export default function PatientHistory() {
   const [params, setParams] = useSearchParams();
   const [search, setSearch] = useState('');
@@ -54,36 +90,7 @@ export default function PatientHistory() {
             <div><div className="text-xs text-ink-500">Visits</div><div className="font-semibold">{visits.length}</div></div>
             <div><div className="text-xs text-ink-500">Total Charges</div><div className="font-semibold">{money(total)}</div></div>
           </div>
-          {visits.length === 0 ? <p className="py-10 text-center text-ink-400">No visits recorded yet</p> : (
-            <ol className="relative space-y-4 border-l-2 border-brand-200 pl-6">
-              {visits.map((v, i) => (
-                <li key={v.VisitId} className="relative">
-                  <span className="absolute -left-[33px] top-3 grid h-6 w-6 place-items-center rounded-full bg-brand-600 text-[11px] font-semibold text-white">{visits.length - i}</span>
-                  <div className="rounded-xl border border-ink-200 bg-white p-4 shadow-sm">
-                    <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                      <span className="flex items-center gap-1.5 font-semibold text-ink-800"><CalendarDays size={15} /> {fDate(v.VisitDate)} <span className="font-normal text-ink-400">{fTime(v.VisitDate)}</span></span>
-                      {v.DoctorName && <span className="flex items-center gap-1 text-ink-500"><Stethoscope size={14} />{v.DoctorName}</span>}
-                      {v.FollowUpDate && <span className="flex items-center gap-1 text-ink-500"><Repeat size={14} />Follow-up {fDate(v.FollowUpDate)}</span>}
-                      <span className="ml-auto">{v.BillNo ? <Badge color="green"><Receipt size={11} className="mr-1 inline" />{v.BillNo} · {money(v.NetAmount)}</Badge> : <Badge color="amber">Not billed</Badge>}</span>
-                    </div>
-                    <div className="whitespace-pre-wrap text-sm text-ink-700">{v.AssessmentNotes || <i className="text-ink-400">No assessment notes</i>}</div>
-                    {v.treatments.length > 0 && (
-                      <div className="mt-3 overflow-hidden rounded-lg border border-ink-100">
-                        <table className="w-full text-sm">
-                          <tbody className="divide-y divide-ink-100">
-                            {v.treatments.map((t) => (
-                              <tr key={t.VisitTreatmentId}><td className="px-3 py-1.5 font-medium">{t.TreatmentName}</td><td className="px-3 py-1.5 text-ink-500">{t.Exercise}</td><td className="px-3 py-1.5 text-right">{money(t.Fee)}</td></tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                    <div className="mt-2 text-right text-xs text-ink-500">Doctor fee {money(v.DoctorFee)} · Treatment {money(v.TreatmentFee)}</div>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          )}
+          <VisitTimeline visits={visits} />
         </>
       )}
     </div>

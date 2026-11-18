@@ -31,12 +31,13 @@ export default function FollowUp() {
           <Button type="button" variant="secondary" onClick={() => setQ({ ...q, from: addDays(today(), -30), to: addDays(today(), -1), status: 'Missed' })}>Missed (30 days)</Button>
         </form>
       </Card>
-      <Table keyField="VisitId" rows={shown} loading={loading} columns={[
+      <Table keyField="VisitFollowUpId" rows={shown} loading={loading} columns={[
         { label: 'Patient ID', render: (r) => <span className="font-mono text-brand-700">{r.PatientCode}</span> },
         { label: 'Name', key: 'PatientName' },
         { label: 'Mobile No', render: (r) => r.MobileNo && <a href={`tel:${r.MobileNo}`} className="inline-flex items-center gap-1 hover:text-brand-700"><Phone size={13} />{r.MobileNo}</a> },
         { label: 'Last Visit', render: (r) => fDate(r.VisitDate) },
         { label: 'Follow-up Date', render: (r) => <b>{fDate(r.FollowUpDate)}</b> },
+        { label: 'Session', render: (r) => (r.Sessions > 1 ? <span className="text-ink-500">{r.SessionNo} of {r.Sessions}</span> : '—') },
         { label: 'Doctor', key: 'DoctorName' },
         { label: 'Status', render: (r) => <Badge color={STATUS_COLOR[r.FollowUpStatus]}>{r.FollowUpStatus}</Badge> },
         { label: '', className: 'text-right', render: (r) => r.FollowUpStatus !== 'Confirmed' && (
