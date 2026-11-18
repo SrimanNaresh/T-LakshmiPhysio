@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Search, Save, Trash2, ArrowLeft, History, ChevronDown, Check, X, Plus } from 'lucide-react';
+import { Search, Save, Trash2, ArrowLeft, History, ChevronDown, Check, X, Plus, Dumbbell, CalendarDays } from 'lucide-react';
 import api, { errMsg } from '../../lib/api';
 import { fDate, fTime, today, addDays, money } from '../../lib/fmt';
 import { BodyChartPanel, SkeletonIcon, mergeBodyChart, parseBodyChart } from '../../components/BodyChart';
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, STATUS_COLOR, Table, Textarea, useToast } from '../../components/ui';
 import { VisitTimeline } from './PatientHistory';
+import CreatableSelect from '../../components/CreatableSelect';
 
 // Drop-down with a tick box per treatment: several can be chosen at once. selected = TreatmentIds.
 function TreatmentMultiSelect({ masters, selected, onToggle, onClear }) {
@@ -63,8 +64,16 @@ const REPEATS = [['once', 'Single date', 0], ['daily', 'Daily', 1], ['alt', 'Alt
 const SPANS = [[7, '1 week'], [14, '2 weeks'], [21, '3 weeks'], [30, '1 month']];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const fDay = (ymd) => `${WEEKDAYS[new Date(`${ymd}T00:00:00`).getDay()]}, ${fDate(ymd)}`;
-const planDates = ({ repeat, span, start }) => {
-  const step = REPEATS.find((r) => r[0] === repeat)?.[2];
+// Days in typed text: "4" / "4 days" / "every 4 days" -> 4, "6 weeks" -> 42, "2 months" -> 60. null if no number.
+const parseDays = (text) => {
+  const m = String(text).toLowerCase().match(/(\d+(?:\.\d+)?)\s*(days|day|d|weeks|week|wks|wk|w|months|month|mo|m)?\b/);
+  if (!m) return null;
+  const unit = (m[2] || 'd')[0];
+  const days = Math.round(Number(m[1]) * (unit === 'w' ? 7 : unit === 'm' ? 30 : 1));
+  return days >= 1 && days <= 365 ? days : null;
+};
+const planDates = ({ repeat, span, start }, repeats = REPEATS) => {
+  const step = repeats.find((r) => r[0] === repeat)?.[2];
   if (!step) return [start];
   const out = [];
   for (let k = 0; k < span; k += step) out.push(addDays(start, k));
@@ -73,13 +82,53 @@ const planDates = ({ repeat, span, start }) => {
 const customPlan = (dates) => ({ repeat: 'custom', span: 7, start: dates[0] || today(), dates });
 
 function FollowUpPlanner({ plan, setPlan }) {
+  const toast = useToast();
   const [extra, setExtra] = useState('');
-  const regen = (p) => setPlan({ ...p, dates: planDates(p) });
+  // Entries the clinic added to the Visit / For lists (saved in the database, shared by everyone).
+  const [added, setAdded] = useState([]);
+  useEffect(() => { api.get('/follow-up-options').then((r) => setAdded(r.data)).catch(() => {}); }, []);
+  const repeats = useMemo(() => [...REPEATS, ...added.filter((o) => o.Kind === 'repeat' && !REPEATS.some((r) => r[2] === o.Days))
+    .map((o) => [`every${o.Days}`, o.Label, o.Days, o.OptionId])].sort((a, b) => a[2] - b[2]), [added]);
+  const spans = useMemo(() => [...SPANS, ...added.filter((o) => o.Kind === 'span' && !SPANS.some((s) => s[0] === o.Days))
+    .map((o) => [o.Days, o.Label, o.OptionId])].sort((a, b) => a[0] - b[0]), [added]);
+  const regen = (p) => setPlan({ ...p, dates: planDates(p, repeats) });
+
+  // Add typed text as a new entry. A number of days already in the list just selects that entry.
+  const addOption = async (kind, text) => {
+    const days = parseDays(text);
+    const list = kind === 'repeat' ? repeats : spans;
+    const same = kind === 'repeat' ? list.find((r) => r[2] === days) : list.find((s) => s[0] === days);
+    if (!same) {
+      try {
+        const { data } = await api.post('/follow-up-options', { Kind: kind, Label: text, Days: days });
+        setAdded((cur) => [...cur.filter((o) => o.OptionId !== data.OptionId), data]);
+        toast(`Added "${data.Label}" to the ${kind === 'repeat' ? 'Visit' : 'For'} list`);
+        const key = kind === 'repeat' ? `every${data.Days}` : data.Days;
+        const next = kind === 'repeat' ? { ...plan, repeat: key } : { ...plan, span: key };
+        const withNew = kind === 'repeat' ? [...repeats, [key, data.Label, data.Days]] : repeats;
+        setPlan({ ...next, dates: planDates(next, withNew) });
+        return;
+      } catch (e) { throw new Error(errMsg(e)); }
+    }
+    regen(kind === 'repeat' ? { ...plan, repeat: same[0] } : { ...plan, span: same[0] });
+  };
+  const removeOption = async (kind, o) => {
+    if (!window.confirm(`Remove "${o.label}" from the ${kind === 'repeat' ? 'Visit' : 'For'} list?`)) return;
+    try {
+      await api.delete(`/follow-up-options/${o.id}`);
+      setAdded((cur) => cur.filter((x) => x.OptionId !== o.id));
+      // If it was the chosen one, fall back to a built-in choice.
+      if (kind === 'repeat' && plan.repeat === o.value) regen({ ...plan, repeat: 'once' });
+      if (kind === 'span' && plan.span === o.value) regen({ ...plan, span: 7 });
+    } catch (e) { toast(errMsg(e), 'error'); }
+  };
+  const repeatHint = (t) => (parseDays(t) ? '' : 'Include a number of days, e.g. "Every 4 days"');
+  const spanHint = (t) => (parseDays(t) ? '' : 'Include a length, e.g. "10 days", "6 weeks" or "2 months"');
   const setDates = (dates) => setPlan({ ...plan, repeat: 'custom', dates: [...new Set(dates)].sort() });
   const repeating = !['once', 'custom'].includes(plan.repeat);
   const n = plan.dates.length;
   return (
-    <div className="mt-4 rounded-lg border border-ink-200 p-3">
+    <div>
       {/* From, repeat, duration and add-a-date on one line; the scheduled dates follow below. */}
       <div className="flex flex-wrap items-end gap-3">
         <Field label="Follow-up From" className="w-[150px]">
@@ -87,15 +136,17 @@ function FollowUpPlanner({ plan, setPlan }) {
             onChange={(e) => e.target.value && regen({ ...plan, start: e.target.value, repeat: plan.repeat === 'custom' ? 'once' : plan.repeat })} />
         </Field>
         <Field label="Visit" className="w-[170px]">
-          <Select value={plan.repeat} onChange={(e) => regen({ ...plan, repeat: e.target.value })}>
-            {REPEATS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            {plan.repeat === 'custom' && <option value="custom">Custom dates</option>}
-          </Select>
+          <CreatableSelect aria-label="Visit" value={plan.repeat} placeholder="Type or pick…"
+            options={[...repeats.map(([v, l, , id]) => ({ value: v, label: l, custom: !!id, id })),
+              ...(plan.repeat === 'custom' ? [{ value: 'custom', label: 'Custom dates' }] : [])]}
+            onChange={(v) => v !== 'custom' && regen({ ...plan, repeat: v })}
+            onAdd={(t) => addOption('repeat', t)} canAdd={repeatHint} onDelete={(o) => removeOption('repeat', o)} />
         </Field>
         <Field label="For" className="w-[140px]">
-          <Select value={plan.span} disabled={!repeating} onChange={(e) => regen({ ...plan, span: Number(e.target.value) })}>
-            {SPANS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </Select>
+          <CreatableSelect aria-label="For" value={plan.span} disabled={!repeating} placeholder="Type or pick…"
+            options={spans.map(([v, l, id]) => ({ value: v, label: l, custom: !!id, id }))}
+            onChange={(v) => regen({ ...plan, span: Number(v) })}
+            onAdd={(t) => addOption('span', t)} canAdd={spanHint} onDelete={(o) => removeOption('span', o)} />
         </Field>
         <Field label="Add Date">
           <div className="flex items-center gap-1.5">
@@ -123,7 +174,6 @@ function FollowUpPlanner({ plan, setPlan }) {
 function ExamineForm({ booking, onBack, onSaved }) {
   const toast = useToast();
   const [masters, setMasters] = useState([]);
-  const [last, setLast] = useState(null);
   const [history, setHistory] = useState([]); // earlier visits of this patient, newest first
   const [showHistory, setShowHistory] = useState(false);
   const [f, setF] = useState({ AssessmentNotes: '', DoctorFee: booking.DoctorFee ?? '' });
@@ -132,7 +182,7 @@ function ExamineForm({ booking, onBack, onSaved }) {
   const changePlan = (p) => { planTouched.current = true; setPlan(p); };
   const [items, setItems] = useState([]);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState('chart'); // 'chart' | 'notes'
+  const [tab, setTab] = useState('chart'); // 'chart' | 'notes' | 'treatment' | 'followup'
   const [bodyNotes, setBodyNotes] = useState({});
   // An examined patient opens their saved assessment for editing; a waiting patient starts a new one.
   const editing = booking.Status === 'Examined';
@@ -150,7 +200,6 @@ function ExamineForm({ booking, onBack, onSaved }) {
         const earlier = r.data.filter((v) => v.BookingId !== booking.BookingId);
         const prev = earlier[0] || null; // the visit before this one
         setHistory(earlier);
-        setLast(prev);
         // A new assessment carries forward the dates still to come from the last visit's schedule.
         const remaining = (prev?.FollowUpDates || []).filter((d) => d > today());
         if (!editing && remaining.length && !planTouched.current) setPlan(customPlan(remaining));
@@ -216,78 +265,77 @@ function ExamineForm({ booking, onBack, onSaved }) {
           <span key={label} className={label === 'Reason' ? 'min-w-0' : 'whitespace-nowrap'}><span className="text-[11px] text-ink-500">{label}: </span>{value}</span>
         ))}
       </div>
-      {last && (
-        <div className="mb-4 rounded-xl border border-ink-200 bg-white p-4 text-sm">
-          <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-500"><History size={14} /> Last visit — {fDate(last.VisitDate)}</div>
-          <div className="whitespace-pre-wrap text-ink-700">{last.AssessmentNotes || <i className="text-ink-400">No notes</i>}</div>
-          {last.treatments?.length > 0 && <div className="mt-1 text-ink-500">Treatment: {last.treatments.map((t) => t.TreatmentName).join(', ')}</div>}
-        </div>
-      )}
       <Card>
         {loadingVisit && <div className="mb-3 text-xs text-ink-500">Loading the saved assessment…</div>}
+        {/* One tab strip: body chart, notes, treatment & fees, follow-up. */}
         <div>
-          <div role="tablist" aria-label="Assessment" className="mb-3 flex gap-1 border-b border-ink-200">
-            {[['chart', 'Body Chart', SkeletonIcon], ['notes', 'Assessment Notes', null]].map(([id, label, Icon]) => (
-              <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)}
-                className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-sm font-semibold transition-colors ${tab === id ? 'border-brand-600 text-brand-700' : 'border-transparent text-ink-500 hover:text-ink-800'}`}>
-                {Icon && <Icon size={16} />} {label}
-                {id === 'chart' && chartCount > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[10px] leading-4 text-white">{chartCount}</span>}
-              </button>
-            ))}
+          <div role="tablist" aria-label="Assessment" className="mb-3 flex flex-wrap items-end gap-x-4 gap-y-2 border-b border-ink-200">
+            <div className="flex flex-wrap gap-1">
+              {[
+                ['chart', 'Body Chart', SkeletonIcon, chartCount],
+                ['notes', 'Assessment Notes', null, 0],
+                ['treatment', 'Treatment & Fees', Dumbbell, items.length],
+                ['followup', 'Follow-up', CalendarDays, plan.dates.length],
+              ].map(([id, label, Icon, count]) => (
+                <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)}
+                  className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-sm font-semibold transition-colors ${tab === id ? 'border-brand-600 text-brand-700' : 'border-transparent text-ink-500 hover:text-ink-800'}`}>
+                  {Icon && <Icon size={16} />} {label}
+                  {count > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[10px] leading-4 text-white">{count}</span>}
+                </button>
+              ))}
+            </div>
           </div>
-          {tab === 'notes' ? (
+
+          {tab === 'chart' && <BodyChartPanel notes={bodyNotes} setNotes={setBodyNotes} gender={booking.Gender} onDone={() => setTab('notes')} />}
+          {tab === 'notes' && (
             <>
               <label htmlFor="assessment-notes" className="sr-only">Patient Assessment Notes</label>
               <Textarea id="assessment-notes" rows={7} autoFocus value={f.AssessmentNotes} onChange={(e) => setF({ ...f, AssessmentNotes: e.target.value })}
                 placeholder="Chief complaint, history, pain scale, ROM, special tests, diagnosis, plan…" />
             </>
-          ) : (
-            <BodyChartPanel notes={bodyNotes} setNotes={setBodyNotes} gender={booking.Gender} onDone={() => setTab('notes')} />
           )}
-        </div>
-
-        {/* Treatment, fee and totals on one line (stacks on smaller screens). */}
-        <div className="mt-5 grid items-end gap-x-4 gap-y-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_150px_auto]">
-          <div><span className="label">Treatment / Exercise</span>
-            <TreatmentMultiSelect masters={masters} selected={items.map((x) => x.TreatmentId)} onToggle={toggleTreatment} onClear={() => setItems([])} />
-          </div>
-          <Field label="Consultation Fee (₹)" className="whitespace-nowrap"><Input type="number" min="0" value={f.DoctorFee} onChange={(e) => setF({ ...f, DoctorFee: e.target.value })} /></Field>
-          <div className="flex min-h-[30px] items-center gap-3 whitespace-nowrap rounded-lg bg-ink-50 px-3 py-1 text-xs">
-            <span><span className="text-ink-500">Doctor </span>{money(f.DoctorFee)}</span>
-            <span><span className="text-ink-500">Treatment </span>{money(tFee)}</span>
-            <span className="border-l border-ink-200 pl-3 text-sm font-semibold">Total {money(Number(f.DoctorFee || 0) + tFee)}</span>
-          </div>
-        </div>
-
-        {/* Follow-up schedule sits above the selected treatment cards. */}
-        <FollowUpPlanner plan={plan} setPlan={changePlan} />
-
-        <div>
-          {items.length > 0 && (
-            // Selected treatments side by side on one line: a small card each (name, exercise, fee, remove).
-            // As many as fit go on a line; more wrap to the next.
-            <div className="mt-3 grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(230px,1fr))]">
-              {items.map((x, i) => (
-                <div key={x.TreatmentId ?? i} className="rounded-lg border border-ink-200 bg-white p-2">
-                  <div className="mb-1 flex items-center justify-between gap-1">
-                    <span className="truncate text-sm font-semibold text-ink-800" title={x.TreatmentName}>{x.TreatmentName}</span>
-                    <button type="button" aria-label={`Remove ${x.TreatmentName}`} onClick={() => setItems(items.filter((_, j) => j !== i))}
-                      className="grid h-6 w-6 shrink-0 place-items-center rounded text-ink-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={14} /></button>
-                  </div>
-                  <div className="flex gap-1.5">
-                    <Input value={x.Exercise} onChange={(e) => upd(i, 'Exercise', e.target.value)} placeholder="Exercise / instructions" aria-label={`${x.TreatmentName} exercise`} />
-                    <Input type="number" min="0" value={x.Fee} onChange={(e) => upd(i, 'Fee', e.target.value)} className="!w-[80px] shrink-0" aria-label={`${x.TreatmentName} fee (₹)`} title="Fee (₹)" />
-                  </div>
+          {tab === 'followup' && <FollowUpPlanner plan={plan} setPlan={changePlan} />}
+          {tab === 'treatment' && (
+            <>
+              <div className="grid items-end gap-x-4 gap-y-3 md:grid-cols-[minmax(0,1fr)_150px_auto]">
+                <div><span className="label">Treatment / Exercise</span>
+                  <TreatmentMultiSelect masters={masters} selected={items.map((x) => x.TreatmentId)} onToggle={toggleTreatment} onClear={() => setItems([])} />
                 </div>
-              ))}
-            </div>
+                <Field label="Consultation Fee (₹)" className="whitespace-nowrap"><Input type="number" min="0" value={f.DoctorFee} onChange={(e) => setF({ ...f, DoctorFee: e.target.value })} /></Field>
+                <div className="flex min-h-[30px] items-center gap-3 whitespace-nowrap rounded-lg border border-teal-200 bg-teal-50 px-3 py-1 text-xs text-teal-900">
+                  <span><span className="text-teal-700">Doctor </span>{money(f.DoctorFee)}</span>
+                  <span><span className="text-teal-700">Treatment </span>{money(tFee)}</span>
+                  <span className="border-l border-teal-200 pl-3 text-sm font-semibold text-teal-800">Total {money(Number(f.DoctorFee || 0) + tFee)}</span>
+                </div>
+              </div>
+              {items.length > 0 && (
+                // Selected treatments side by side on one line: a small card each (name, exercise, fee, remove).
+                // As many as fit go on a line; more wrap to the next.
+                <div className="mt-3 grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(230px,1fr))]">
+                  {items.map((x, i) => (
+                    <div key={x.TreatmentId ?? i} className="rounded-lg border border-ink-200 bg-white p-2">
+                      <div className="mb-1 flex items-center justify-between gap-1">
+                        <span className="truncate text-sm font-semibold text-ink-800" title={x.TreatmentName}>{x.TreatmentName}</span>
+                        <button type="button" aria-label={`Remove ${x.TreatmentName}`} onClick={() => setItems(items.filter((_, j) => j !== i))}
+                          className="grid h-6 w-6 shrink-0 place-items-center rounded text-ink-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={14} /></button>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <Input value={x.Exercise} onChange={(e) => upd(i, 'Exercise', e.target.value)} placeholder="Exercise / instructions" aria-label={`${x.TreatmentName} exercise`} />
+                        <Input type="number" min="0" value={x.Fee} onChange={(e) => upd(i, 'Fee', e.target.value)} className="!w-[80px] shrink-0" aria-label={`${x.TreatmentName} fee (₹)`} title="Fee (₹)" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
 
-        <div className="mt-5 flex justify-end">
-          <Button icon={Save} loading={busy} disabled={loadingVisit} onClick={save}>{editing ? 'Update Assessment' : 'Save Assessment'}</Button>
-        </div>
       </Card>
+      {/* One Save for the whole assessment, below the tabs, so it works from any tab. */}
+      <div className="mt-4 flex justify-end">
+        <Button icon={Save} loading={busy} disabled={loadingVisit} onClick={save}>{editing ? 'Update Assessment' : 'Save Assessment'}</Button>
+      </div>
     </div>
   );
 }

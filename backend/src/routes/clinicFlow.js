@@ -100,6 +100,54 @@ router.delete('/treatments/:id', h(async (req, res) => {
   res.json({ ok: true });
 }));
 
+/* ---------- Follow-up options ---------- */
+// Entries the doctor adds to the Examine "Visit" (repeat every N days) and "For" (span of N days)
+// drop-downs. The built-in choices live in the frontend; only added ones are stored here.
+const FOLLOW_UP_KINDS = ['repeat', 'span'];
+let followUpTableReady = null;
+const ensureFollowUpOptionTable = () => {
+  followUpTableReady ||= query(`
+    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='FollowUpOption' AND xtype='U')
+    CREATE TABLE FollowUpOption (
+        OptionId  INT IDENTITY(1,1) PRIMARY KEY,
+        Kind      NVARCHAR(10) NOT NULL,
+        Label     NVARCHAR(60) NOT NULL,
+        Days      INT NOT NULL,
+        CreatedBy NVARCHAR(100) NULL,
+        CreatedAt DATETIME NOT NULL DEFAULT GETDATE(),
+        CONSTRAINT UQ_FollowUpOption UNIQUE (Kind, Days)
+    );`).catch((e) => { followUpTableReady = null; throw e; });
+  return followUpTableReady;
+};
+
+router.get('/follow-up-options', h(async (req, res) => {
+  await ensureFollowUpOptionTable();
+  res.json(await query('SELECT OptionId, Kind, Label, Days FROM FollowUpOption ORDER BY Kind, Days'));
+}));
+
+router.post('/follow-up-options', h(async (req, res) => {
+  const b = req.body || {};
+  const label = String(b.Label || '').trim();
+  const days = Math.round(Number(b.Days));
+  if (!FOLLOW_UP_KINDS.includes(b.Kind)) throw bad('Invalid option type');
+  if (!label) throw bad('Name is required');
+  if (label.length > 60) throw bad('Name is too long');
+  if (!Number.isFinite(days) || days < 1 || days > 365) throw bad('Days must be between 1 and 365');
+  await ensureFollowUpOptionTable();
+  const [dup] = await query('SELECT OptionId, Kind, Label, Days FROM FollowUpOption WHERE Kind=@k AND Days=@d', { k: b.Kind, d: days });
+  if (dup) return res.json(dup); // same number of days already listed: reuse it
+  const [row] = await query(`INSERT INTO FollowUpOption (Kind, Label, Days, CreatedBy)
+    OUTPUT INSERTED.OptionId, INSERTED.Kind, INSERTED.Label, INSERTED.Days VALUES (@k, @l, @d, @u)`,
+  { k: b.Kind, l: label, d: days, u: req.user.userName });
+  res.json(row);
+}));
+
+router.delete('/follow-up-options/:id', h(async (req, res) => {
+  await ensureFollowUpOptionTable();
+  await query('DELETE FROM FollowUpOption WHERE OptionId=@id', { id: Number(req.params.id) });
+  res.json({ ok: true });
+}));
+
 /* ---------- Examine ---------- */
 // Follow-up dates from the form: FollowUpDates (list) or the older single FollowUpDate.
 function followUpDates(b) {

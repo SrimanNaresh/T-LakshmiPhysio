@@ -62,12 +62,13 @@ export default function ConfirmPatient() {
             { label: '', className: 'text-right', render: () => <span className="text-xs font-medium text-brand-700">Select →</span> },
           ]} />
           {canSee(screens, 'patientRegistration') && (
-            <div className="mt-3 text-sm text-ink-500">
-              Not in the list?{' '}
-              <button className="inline-flex items-center gap-1 font-medium text-brand-700 hover:underline"
+            <div className="mt-3 flex items-center gap-3 text-sm text-ink-500">
+              Not in the list?
+              {/* No match → primary call to action; otherwise a quieter secondary button. */}
+              <Button icon={UserPlus} variant={rows.length === 0 ? 'primary' : 'secondary'}
                 onClick={() => nav(`/registration/patient?name=${encodeURIComponent(q.name)}&mobile=${encodeURIComponent(q.mobile)}`)}>
-                <UserPlus size={14} /> Register new patient
-              </button>
+                Register new patient
+              </Button>
             </div>
           )}
         </>

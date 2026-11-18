@@ -163,6 +163,18 @@ CREATE TABLE VisitFollowUp (
 INSERT INTO VisitFollowUp (VisitId, FollowUpDate) SELECT VisitId, FollowUpDate FROM Visit WHERE FollowUpDate IS NOT NULL;
 END
 
+-- Entries added to the Examine follow-up drop-downs: Kind 'repeat' = every Days days, 'span' = for Days days.
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='FollowUpOption' AND xtype='U')
+CREATE TABLE FollowUpOption (
+    OptionId  INT IDENTITY(1,1) PRIMARY KEY,
+    Kind      NVARCHAR(10) NOT NULL,
+    Label     NVARCHAR(60) NOT NULL,
+    Days      INT NOT NULL,
+    CreatedBy NVARCHAR(100) NULL,
+    CreatedAt DATETIME NOT NULL DEFAULT GETDATE(),
+    CONSTRAINT UQ_FollowUpOption UNIQUE (Kind, Days)
+);
+
 IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Bill' AND xtype='U')
 CREATE TABLE Bill (
     BillId        INT IDENTITY(1,1) PRIMARY KEY,
