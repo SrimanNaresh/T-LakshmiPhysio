@@ -34,7 +34,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP = 'lakshmiphysio'
 REMOTE_DIR = f'/opt/projects/{APP}'
 SUBDOMAIN = 'lakshmiphysio.thangaminfotech.com'
-SKIP = {'node_modules', 'dist', '.git', '.claude', '__pycache__'}
+# .wwebjs_auth / .wwebjs_cache hold a local WhatsApp login session: never upload them.
+SKIP = {'node_modules', 'dist', '.git', '.claude', '__pycache__', '.wwebjs_auth', '.wwebjs_cache'}
 
 
 def build_archive():
