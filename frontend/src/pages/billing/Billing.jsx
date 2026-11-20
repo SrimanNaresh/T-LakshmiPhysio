@@ -88,17 +88,17 @@ function BillForm({ visit, onBack, onSaved }) {
     <div className="w-full">
       <PageHeader title="New Bill" actions={<Button variant="secondary" icon={ArrowLeft} onClick={onBack}>Back</Button>} />
       <Card>
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
           <Field label="Patient ID"><Input disabled value={visit.PatientCode} /></Field>
           <Field label="Name"><Input disabled value={visit.PatientName} /></Field>
           <Field label="Mobile No"><Input disabled value={visit.MobileNo || ''} /></Field>
           <Field label="Doctor Fee (₹)"><Input disabled value={f.DoctorFee} /></Field>
           <Field label="Treatment Fee (₹)"><Input disabled value={f.TreatmentFee} /></Field>
           <Field label="Discount (₹)"><Input type="number" min="0" value={f.Discount} onChange={(e) => setF({ ...f, Discount: e.target.value })} /></Field>
-          <Field label="Payment Mode">
+          <Field label="Payment Mode" className="lg:col-span-2">
             <Select value={f.PaymentMode} onChange={(e) => setF({ ...f, PaymentMode: e.target.value })}><option>Cash</option><option>UPI</option><option>Card</option><option>Bank Transfer</option></Select>
           </Field>
-          <div className="flex flex-col justify-end sm:col-span-2">
+          <div className="flex flex-col justify-end sm:col-span-2 lg:col-span-4">
             <div className="rounded-lg bg-brand-50 px-4 py-3 text-right">
               <div className="text-xs uppercase tracking-wide text-ink-500">Net Amount</div>
               <div className={`text-2xl font-semibold tabular-nums ${net < 0 ? 'text-rose-600' : 'text-brand-800'}`}>{money(net)}</div>
