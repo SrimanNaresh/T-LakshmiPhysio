@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { query, h, bad } from '../db/query.js';
 import * as wa from '../services/whatsapp.js';
-import { loadBill, billPdf, fDateTime, money } from '../services/billPdf.js';
+import { loadBill, billPdf } from '../services/billPdf.js';
 
 const router = Router();
 
@@ -99,7 +99,6 @@ router.post('/whatsapp/send-bill', h(async (req, res) => {
   const c = clinic || {};
   const caption = [
     `Hello ${bill.PatientName}, thank you for visiting ${c.ClinicName || 'Lakshmi Physio'}.`,
-    `Your bill ${bill.BillNo} (${fDateTime(bill.BillDate)}) for ${money(bill.NetAmount)} is attached.`,
     c.ContactNo ? `For queries call ${c.ContactNo}.` : '',
   ].filter(Boolean).join('\n');
   try {
