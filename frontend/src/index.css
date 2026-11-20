@@ -231,6 +231,10 @@
   body { background: #fff !important; }
   .animate-fade-in { animation: none !important; opacity: 1 !important; transform: none !important; }
   @page { size: A5; margin: 10mm; }
+  /* Reports print on A4 (receipts stay A5). */
+  .report-print { page: report; font-size: 11px; }
+  .report-print td, .report-print th { padding: 4px 6px !important; }
+  @page report { size: A4; margin: 12mm; }
 }
 
 /* Smaller text throughout one screen (the Patient Assessment form): wrap it in .form-compact.

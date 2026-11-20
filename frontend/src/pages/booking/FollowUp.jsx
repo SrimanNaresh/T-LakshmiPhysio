@@ -1,38 +1,71 @@
-import { useEffect, useState } from 'react';
-import { Search, CheckCircle2, Phone } from 'lucide-react';
-import api from '../../lib/api';
+import { useEffect, useRef, useState } from 'react';
+import { Search, CheckCircle2, Phone, Loader2 } from 'lucide-react';
+import api, { errMsg } from '../../lib/api';
 import { fDate, today, addDays, isoDate, nowLocal } from '../../lib/fmt';
 import ConfirmForm from '../../components/ConfirmForm';
-import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, STATUS_COLOR, Table } from '../../components/ui';
+import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, STATUS_COLOR, Table, useToast } from '../../components/ui';
+import { WhatsAppIcon } from '../../lib/whatsapp';
+import { useAuth } from '../../lib/auth';
 
-// WhatsApp glyph (lucide has no brand icons).
-function WhatsAppIcon({ size = 16 }) {
+// Follow-up date with a calendar picker. Saves a moment after the last change (so typing a date
+// digit by digit saves once), and only valid dates on or after the visit day.
+function FollowUpDateCell({ row, onSaved }) {
+  const toast = useToast();
+  const orig = isoDate(row.FollowUpDate);
+  const minDay = isoDate(row.VisitDate);
+  const [val, setVal] = useState(orig);
+  const [busy, setBusy] = useState(false);
+  const timer = useRef(null);
+  useEffect(() => { setVal(orig); }, [orig]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  const save = async (d) => {
+    setBusy(true);
+    try {
+      await api.put(`/follow-ups/${row.VisitFollowUpId}`, { FollowUpDate: d });
+      toast(`Follow-up for ${row.PatientName} moved to ${fDate(d)}`);
+      onSaved();
+    } catch (e) { toast(errMsg(e), 'error'); setVal(orig); } finally { setBusy(false); }
+  };
+  const change = (d) => {
+    setVal(d);
+    clearTimeout(timer.current);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || d === orig || d < minDay) return;
+    timer.current = setTimeout(() => save(d), 700);
+  };
+
   return (
-    <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" aria-hidden="true">
-      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
-    </svg>
+    <span className="inline-flex items-center gap-1.5">
+      <input type="date" value={val} min={minDay} disabled={busy} onChange={(e) => change(e.target.value)}
+        onBlur={() => { if (val < minDay || !val) setVal(orig); }}
+        aria-label={`Follow-up date for ${row.PatientName}`} title="Change follow-up date"
+        className="input !w-[150px] !py-1 font-semibold" />
+      {busy && <Loader2 size={14} className="animate-spin text-brand-600" />}
+    </span>
   );
 }
 
-// wa.me needs the number in international form without "+". Local 10-digit numbers get India's 91.
-const waNumber = (mobile) => {
-  let d = String(mobile || '').replace(/\D/g, '');
-  if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
-  if (d.length === 10) d = `91${d}`;
-  return d;
-};
-
-const waReminder = (r) => {
-  const text = `Hello ${r.PatientName}, this is a reminder from Lakshmi Physiotherapy: your follow-up visit is due on ${fDate(r.FollowUpDate)}.`
-    + `${r.DoctorName ? ` Doctor: ${r.DoctorName}.` : ''} Please reply to confirm your time. Thank you.`;
-  return `https://wa.me/${waNumber(r.MobileNo)}?text=${encodeURIComponent(text)}`;
-};
+const reminderText = (r, clinicName) => `Hello ${r.PatientName}, this is a reminder from ${clinicName || 'Lakshmi Physiotherapy'}: your follow-up visit is due on ${fDate(r.FollowUpDate)}.`
+  + `${r.DoctorName ? ` Doctor: ${r.DoctorName}.` : ''} Please reply to confirm your time. Thank you.`;
 
 export default function FollowUp() {
   const [q, setQ] = useState({ from: today(), to: addDays(today(), 7), status: '' });
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sel, setSel] = useState(null);
+  const toast = useToast();
+  const { clinic } = useAuth();
+  // Send the reminder straight from the clinic's linked WhatsApp (no WhatsApp Web tab). The server takes
+  // the number from the patient record and sends only from the verified Clinic Master number.
+  const [sendingId, setSendingId] = useState(null);
+  const sendReminder = async (r) => {
+    if (sendingId) return;
+    setSendingId(r.VisitFollowUpId);
+    try {
+      await api.post('/whatsapp/send', { PatientId: r.PatientId, Text: reminderText(r, clinic?.ClinicName) });
+      toast(`Reminder sent to ${r.PatientName} on WhatsApp`);
+    } catch (e) { toast(errMsg(e), 'error'); } finally { setSendingId(null); }
+  };
 
   const load = () => { setLoading(true); api.get('/follow-ups', { params: q }).then((r) => setRows(r.data)).finally(() => setLoading(false)); };
   useEffect(load, []);
@@ -59,18 +92,19 @@ export default function FollowUp() {
         { label: 'Name', key: 'PatientName' },
         { label: 'Mobile No', render: (r) => r.MobileNo && <a href={`tel:${r.MobileNo}`} className="inline-flex items-center gap-1 hover:text-brand-700"><Phone size={13} />{r.MobileNo}</a> },
         { label: 'Last Visit', render: (r) => fDate(r.VisitDate) },
-        { label: 'Follow-up Date', render: (r) => <b>{fDate(r.FollowUpDate)}</b> },
+        // Every follow-up date can be moved with the calendar (status is worked out again after the change).
+        { label: 'Follow-up Date', render: (r) => <FollowUpDateCell row={r} onSaved={load} /> },
         { label: 'Session', render: (r) => (r.Sessions > 1 ? <span className="text-ink-500">{r.SessionNo} of {r.Sessions}</span> : '—') },
         { label: 'Doctor', key: 'DoctorName' },
         { label: 'Status', render: (r) => <Badge color={STATUS_COLOR[r.FollowUpStatus]}>{r.FollowUpStatus}</Badge> },
         { label: '', className: 'text-right', render: (r) => r.FollowUpStatus !== 'Confirmed' && (
           <span className="inline-flex items-center justify-end gap-3">
             {r.MobileNo && (
-              <a href={waReminder(r)} target="_blank" rel="noopener noreferrer" title="Send WhatsApp reminder" aria-label={`Send WhatsApp reminder to ${r.PatientName}`}
-                onClick={(e) => e.stopPropagation()}
-                className="grid h-6 w-6 place-items-center rounded-lg border border-[#25D366]/30 bg-[#25D366]/10 text-[#1DA851] transition-colors hover:bg-[#25D366] hover:text-white">
-                <WhatsAppIcon size={14} />
-              </a>
+              <button type="button" title="Send WhatsApp reminder" aria-label={`Send WhatsApp reminder to ${r.PatientName}`}
+                disabled={!!sendingId} onClick={(e) => { e.stopPropagation(); sendReminder(r); }}
+                className="grid h-6 w-6 place-items-center rounded-lg border border-[#25D366]/30 bg-[#25D366]/10 text-[#1DA851] transition-colors hover:bg-[#25D366] hover:text-white disabled:cursor-not-allowed disabled:opacity-60">
+                {sendingId === r.VisitFollowUpId ? <Loader2 size={14} className="animate-spin" /> : <WhatsAppIcon size={14} />}
+              </button>
             )}
             <Button size="sm" icon={CheckCircle2} onClick={() => setSel(r)}>Confirm</Button>
           </span>) },

@@ -35,6 +35,14 @@ CREATE TABLE ClinicMaster (
     UpdatedAt   DATETIME NOT NULL DEFAULT GETDATE()
 );
 
+-- WhatsApp sender: the clinic's or the doctor's number. It is verified when the phone that scans
+-- the WhatsApp QR code is this same number (WhatsAppVerifiedAt); changing the number clears it.
+IF COL_LENGTH('ClinicMaster', 'WhatsAppNo') IS NULL
+ALTER TABLE ClinicMaster ADD
+    WhatsAppNo         NVARCHAR(20) NULL,
+    WhatsAppOwner      NVARCHAR(10) NULL,
+    WhatsAppVerifiedAt DATETIME     NULL;
+
 IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Validity' AND xtype='U')
 CREATE TABLE Validity (
     ValidityId  INT IDENTITY(1,1) PRIMARY KEY,
@@ -173,6 +181,52 @@ CREATE TABLE FollowUpOption (
     CreatedBy NVARCHAR(100) NULL,
     CreatedAt DATETIME NOT NULL DEFAULT GETDATE(),
     CONSTRAINT UQ_FollowUpOption UNIQUE (Kind, Days)
+);
+
+-- Master Details (Examine): titles grouped by Category ('Exercise' | 'Modality'), each with
+-- an optional image and a list of sub-titles that have their own image. Images are data URLs.
+-- Delete is soft (IsActive = 0).
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='MasterTitle' AND xtype='U')
+CREATE TABLE MasterTitle (
+    MasterTitleId INT IDENTITY(1,1) PRIMARY KEY,
+    Category      NVARCHAR(20)  NOT NULL,
+    Title         NVARCHAR(200) NOT NULL,
+    Image         NVARCHAR(MAX) NULL,
+    IsActive      BIT NOT NULL DEFAULT 1,
+    CreatedBy     NVARCHAR(100) NULL,
+    CreatedAt     DATETIME NOT NULL DEFAULT GETDATE(),
+    UpdatedAt     DATETIME NULL
+);
+
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='MasterSubTitle' AND xtype='U')
+CREATE TABLE MasterSubTitle (
+    MasterSubTitleId INT IDENTITY(1,1) PRIMARY KEY,
+    MasterTitleId    INT NOT NULL,
+    SubTitle         NVARCHAR(200) NOT NULL,
+    Image            NVARCHAR(MAX) NULL,
+    IsActive         BIT NOT NULL DEFAULT 1,
+    CreatedBy        NVARCHAR(100) NULL,
+    CreatedAt        DATETIME NOT NULL DEFAULT GETDATE(),
+    UpdatedAt        DATETIME NULL,
+    CONSTRAINT FK_MasterSubTitle_Title FOREIGN KEY (MasterTitleId) REFERENCES MasterTitle(MasterTitleId)
+);
+
+-- Per-patient notes on a Master Details image: numbered pins (JSON [{n,x,y,text}], x/y are
+-- 0..1 fractions of the image) plus one common note. RefType 'title' | 'sub', RefId is that row's id.
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='PatientImageMark' AND xtype='U')
+CREATE TABLE PatientImageMark (
+    MarkId     INT IDENTITY(1,1) PRIMARY KEY,
+    PatientId  INT NOT NULL,
+    RefType    NVARCHAR(10) NOT NULL,
+    RefId      INT NOT NULL,
+    Pins       NVARCHAR(MAX) NULL,
+    CommonNote NVARCHAR(MAX) NULL,
+    IsActive   BIT NOT NULL DEFAULT 1,
+    CreatedBy  NVARCHAR(100) NULL,
+    CreatedAt  DATETIME NOT NULL DEFAULT GETDATE(),
+    UpdatedBy  NVARCHAR(100) NULL,
+    UpdatedAt  DATETIME NULL,
+    CONSTRAINT FK_PatientImageMark_Patient FOREIGN KEY (PatientId) REFERENCES Patient(PatientId)
 );
 
 IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Bill' AND xtype='U')

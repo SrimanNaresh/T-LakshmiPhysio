@@ -78,6 +78,26 @@ router.get('/follow-ups', h(async (req, res) => {
     ORDER BY fu.FollowUpDate, p.Name`, { f: nz(from) || null, t: nz(to) || null }));
 }));
 
+// Move one follow-up date (Follow-up Patients screen). Visit.FollowUpDate keeps the earliest of the visit's dates.
+router.put('/follow-ups/:id', h(async (req, res) => {
+  const id = Number(req.params.id);
+  const d = String(req.body?.FollowUpDate || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || Number.isNaN(Date.parse(d))) throw bad('Enter a valid follow-up date');
+  const [fu] = await query(`SELECT f.VisitFollowUpId, f.VisitId, CONVERT(char(10), v.VisitDate, 23) AS VisitDay
+    FROM VisitFollowUp f JOIN Visit v ON v.VisitId=f.VisitId WHERE f.VisitFollowUpId=@id`, { id });
+  if (!fu) throw bad('Follow-up not found', 404);
+  if (d < fu.VisitDay) throw bad('Follow-up date cannot be before the visit date');
+  const [dup] = await query('SELECT 1 AS x FROM VisitFollowUp WHERE VisitId=@v AND FollowUpDate=@d AND VisitFollowUpId<>@id',
+    { v: fu.VisitId, d, id });
+  if (dup) throw bad('This patient already has a follow-up on that date');
+  await withTransaction(async (tx) => {
+    await query('UPDATE VisitFollowUp SET FollowUpDate=@d WHERE VisitFollowUpId=@id', { d, id }, tx);
+    await query('UPDATE Visit SET FollowUpDate=(SELECT MIN(FollowUpDate) FROM VisitFollowUp WHERE VisitId=@v) WHERE VisitId=@v',
+      { v: fu.VisitId }, tx);
+  });
+  res.json({ ok: true });
+}));
+
 /* ---------- Treatment master ---------- */
 router.get('/treatments', h(async (req, res) => {
   res.json(await query('SELECT * FROM Treatment WHERE IsActive=1 ORDER BY TreatmentName'));
@@ -257,13 +277,17 @@ router.get('/visits', h(async (req, res) => {
 }));
 
 /* ---------- Billing ---------- */
+// Unbilled visits. ?date=YYYY-MM-DD limits it to that day's visits (the Billing screen sends today).
 router.get('/billing/pending', h(async (req, res) => {
+  const date = nz(req.query.date) || null;
+  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw bad('Invalid date');
   res.json(await query(`
     SELECT v.VisitId, v.VisitDate, v.PatientId, v.DoctorFee, v.TreatmentFee, p.PatientCode, p.Name AS PatientName,
            p.MobileNo, e.Name AS DoctorName
     FROM Visit v JOIN Patient p ON p.PatientId=v.PatientId
     LEFT JOIN Employee e ON e.EmployeeId=v.DoctorId
-    WHERE v.IsBilled=0 ORDER BY v.VisitDate DESC`));
+    WHERE v.IsBilled=0 AND (@d IS NULL OR CAST(v.VisitDate AS DATE) = @d)
+    ORDER BY v.VisitDate DESC`, { d: date }));
 }));
 
 router.post('/bills', h(async (req, res) => {

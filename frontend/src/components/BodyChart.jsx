@@ -33,6 +33,15 @@ export function parseBodyChart(text) {
   return out;
 }
 
+// Splits saved notes into the body chart lines ("Bone — front: note") and the doctor's own notes.
+export function splitBodyChart(text) {
+  const cur = text || '';
+  const m = cur.match(BLOCK_RE);
+  if (!m) return { findings: [], rest: cur.trim() };
+  const findings = m[0].split('\n').filter((l) => l.startsWith('• ')).map((l) => l.slice(2));
+  return { findings, rest: cur.replace(BLOCK_RE, '\n').replace(/\n{3,}/g, '\n\n').trim() };
+}
+
 // Puts the block into the notes: replaces an existing block, or appends it at the end.
 export function mergeBodyChart(text, notes) {
   const block = bodyChartText(notes);

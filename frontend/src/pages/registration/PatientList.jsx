@@ -6,6 +6,8 @@ import { useAuth } from '../../lib/auth';
 import { canSee } from '../../lib/menu';
 import { fDate } from '../../lib/fmt';
 import { Button, Card, Field, Input, PageHeader, Table } from '../../components/ui';
+import SendWhatsAppDialog from '../../components/SendWhatsAppDialog';
+import { WhatsAppIcon } from '../../lib/whatsapp';
 
 export default function PatientList() {
   const nav = useNavigate();
@@ -13,6 +15,7 @@ export default function PatientList() {
   const [q, setQ] = useState({ search: '', from: '', to: '' });
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [waFor, setWaFor] = useState(null); // patient to message on WhatsApp
 
   const load = () => { setLoading(true); api.get('/patients', { params: q }).then((r) => setRows(r.data)).finally(() => setLoading(false)); };
   useEffect(load, []);
@@ -39,10 +42,12 @@ export default function PatientList() {
         { label: '', className: 'text-right whitespace-nowrap', render: (r) => (
           <div className="flex justify-end gap-1">
             {canSee(screens, 'confirmPatient') && <Button size="sm" variant="secondary" icon={CheckCircle2} onClick={() => nav(`/booking/confirm?patientId=${r.PatientId}`)}>Confirm</Button>}
+            <Button size="sm" variant="ghost" icon={WhatsAppIcon} title="Send WhatsApp message" disabled={!r.MobileNo} onClick={() => setWaFor(r)} className="!text-[#1DA851]" />
             {canSee(screens, 'patientHistory') && <Button size="sm" variant="ghost" icon={History} title="History" onClick={() => nav(`/examine/history?patientId=${r.PatientId}`)} />}
             {canSee(screens, 'patientRegistration') && <Button size="sm" variant="ghost" icon={Pencil} title="Edit" onClick={() => nav(`/registration/patient?id=${r.PatientId}`)} />}
           </div>) },
       ]} />
+      <SendWhatsAppDialog open={!!waFor} patient={waFor} onClose={() => setWaFor(null)} />
     </div>
   );
 }

@@ -1,9 +1,36 @@
 import { useEffect, useState } from 'react';
-import { Save, Printer, Search, ArrowLeft } from 'lucide-react';
+import { Save, Printer, Search, ArrowLeft, Loader2 } from 'lucide-react';
 import api, { errMsg } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { fDate, fDateTime, today, money } from '../../lib/fmt';
 import { Button, Card, Field, Input, Modal, PageHeader, Select, Table, useToast } from '../../components/ui';
+import { WhatsAppIcon, waNumber } from '../../lib/whatsapp';
+
+const hasWa = (mobile) => waNumber(mobile).length >= 11;
+
+// Bill details as WhatsApp text (the receipt in words).
+function billMessage(bill, clinic) {
+  const L = [
+    `Hello ${bill.PatientName}, thank you for visiting ${clinic?.ClinicName || 'Lakshmi Physiotherapy'}.`,
+    '', '*Bill details*',
+    `Bill No: ${bill.BillNo}`,
+    `Date: ${fDateTime(bill.BillDate)}`,
+    `Patient ID: ${bill.PatientCode}`,
+  ];
+  if (bill.DoctorName) L.push(`Doctor: ${bill.DoctorName}`);
+  L.push('', `Doctor Fee: ${money(bill.DoctorFee)}`);
+  if (bill.treatments?.length) {
+    L.push('Treatments:');
+    bill.treatments.forEach((t) => L.push(`  • ${t.TreatmentName}: ${money(t.Fee)}`));
+  }
+  L.push(`Treatment Fee: ${money(bill.TreatmentFee)}`);
+  if (Number(bill.Discount) > 0) L.push(`Discount: - ${money(bill.Discount)}`);
+  L.push(`*Net Amount: ${money(bill.NetAmount)}*`, `Paid by: ${bill.PaymentMode}`, '', 'Get well soon!');
+  if (clinic?.ContactNo) L.push(`For queries call ${clinic.ContactNo}.`);
+  return L.join('\n');
+}
+
+const waBtn = 'inline-flex items-center gap-2 rounded-lg bg-[#25D366] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1ebe5b]';
 
 function BillPrint({ bill, clinic }) {
   return (
@@ -86,6 +113,7 @@ function BillForm({ visit, onBack, onSaved }) {
 
 export default function Billing() {
   const { clinic } = useAuth();
+  const toast = useToast();
   const [tab, setTab] = useState('pending');
   const [pending, setPending] = useState([]);
   const [bills, setBills] = useState([]);
@@ -94,11 +122,24 @@ export default function Billing() {
   const [print, setPrint] = useState(null);
   const [fullClinic, setFullClinic] = useState(clinic);
 
-  const loadPending = () => api.get('/billing/pending').then((r) => setPending(r.data));
+  // Only today's examined patients waiting for a bill.
+  const loadPending = () => api.get('/billing/pending', { params: { date: today() } }).then((r) => setPending(r.data));
   const loadBills = () => api.get('/bills', { params: q }).then((r) => setBills(r.data));
   useEffect(() => { loadPending(); loadBills(); api.get('/clinic').then((r) => setFullClinic(r.data)).catch(() => {}); }, []);
 
   const openPrint = async (id) => setPrint((await api.get(`/bills/${id}`)).data);
+  // Send the bill details straight from the clinic's linked WhatsApp (no WhatsApp Web tab). The server
+  // takes the number from the patient record and sends only from the verified Clinic Master number.
+  const [sendingId, setSendingId] = useState(null);
+  const sendWa = async (row) => {
+    if (sendingId) return;
+    setSendingId(row.BillId);
+    try {
+      const bill = row.treatments ? row : (await api.get(`/bills/${row.BillId}`)).data;
+      await api.post('/whatsapp/send', { PatientId: bill.PatientId, Text: billMessage(bill, fullClinic) });
+      toast(`Bill ${bill.BillNo} sent to ${bill.PatientName} on WhatsApp`);
+    } catch (e) { toast(errMsg(e), 'error'); } finally { setSendingId(null); }
+  };
 
   if (visit) {
     return <BillForm visit={visit} onBack={() => setVisit(null)}
@@ -117,7 +158,7 @@ export default function Billing() {
           ))}
         </div>
         {tab === 'pending' ? (
-          <Table keyField="VisitId" rows={pending} onRowClick={setVisit} empty="No examined patients waiting for a bill" columns={[
+          <Table keyField="VisitId" rows={pending} onRowClick={setVisit} empty={`No examined patients waiting for a bill today (${fDate(today())})`} columns={[
             { label: 'Patient ID', render: (r) => <span className="font-mono text-brand-700">{r.PatientCode}</span> },
             { label: 'Name', key: 'PatientName' },
             { label: 'Mobile No', key: 'MobileNo' },
@@ -148,7 +189,17 @@ export default function Billing() {
               { label: 'Discount', className: 'text-right', render: (r) => money(r.Discount) },
               { label: 'Net', className: 'text-right font-semibold', render: (r) => money(r.NetAmount) },
               { label: 'Mode', key: 'PaymentMode' },
-              { label: '', className: 'text-right', render: (r) => <Button size="sm" variant="ghost" icon={Printer} onClick={() => openPrint(r.BillId)} /> },
+              { label: '', className: 'text-right', render: (r) => (
+                <span className="inline-flex items-center justify-end gap-1">
+                  {hasWa(r.MobileNo) && (
+                    <button type="button" onClick={() => sendWa(r)} disabled={!!sendingId} title="Send bill on WhatsApp" aria-label={`Send bill ${r.BillNo} to ${r.PatientName} on WhatsApp`}
+                      className="grid h-7 w-7 place-items-center rounded-lg border border-[#25D366]/30 bg-[#25D366]/10 text-[#1DA851] transition-colors hover:bg-[#25D366] hover:text-white disabled:cursor-not-allowed disabled:opacity-60">
+                      {sendingId === r.BillId ? <Loader2 size={14} className="animate-spin" /> : <WhatsAppIcon size={14} />}
+                    </button>
+                  )}
+                  <Button size="sm" variant="ghost" icon={Printer} title="Print" onClick={() => openPrint(r.BillId)} />
+                </span>
+              ) },
             ]} />
             <div className="mt-3 text-right text-sm text-ink-600">{bills.length} bills · Total <b>{money(billTotal)}</b></div>
           </>
@@ -159,7 +210,15 @@ export default function Billing() {
         {print && (
           <>
             <BillPrint bill={print} clinic={fullClinic} />
-            <div className="mt-4 flex justify-end"><Button icon={Printer} onClick={() => window.print()}>Print</Button></div>
+            <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+              {hasWa(print.MobileNo)
+                ? <button type="button" onClick={() => sendWa(print)} disabled={!!sendingId} className={`${waBtn} disabled:cursor-not-allowed disabled:opacity-70`}>
+                    {sendingId === print.BillId ? <Loader2 size={16} className="animate-spin" /> : <WhatsAppIcon size={16} />}
+                    {sendingId === print.BillId ? 'Sending…' : 'Send on WhatsApp'}
+                  </button>
+                : <span className="mr-auto text-12 text-ink-400">No valid mobile number to send on WhatsApp</span>}
+              <Button icon={Printer} onClick={() => window.print()}>Print</Button>
+            </div>
           </>
         )}
       </Modal>
