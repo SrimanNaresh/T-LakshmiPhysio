@@ -1,6 +1,7 @@
 import {
   Building2, CalendarClock, Users, ShieldCheck, UserPlus, List, Briefcase, CheckCircle2,
-  ClipboardList, Repeat, Stethoscope, Dumbbell, History, Receipt, LayoutDashboard, Settings, CalendarCheck,
+  ClipboardList, Repeat, Stethoscope, Dumbbell, History, Layers, Receipt, LayoutDashboard, Settings, CalendarCheck,
+  BarChart3, IndianRupee,
 } from 'lucide-react';
 
 // Every screen that can be granted in Menu Access. `key` is what gets stored in MenuAccess.ScreenKey.
@@ -19,10 +20,14 @@ export const MENU = [
   { group: 'Examine', icon: Stethoscope, tone: 'violet', items: [
     { key: 'examine', label: 'Confirm Patient List', path: '/examine/queue', icon: Stethoscope },
     { key: 'treatmentMaster', label: 'Treatment Master', path: '/examine/treatments', icon: Dumbbell },
+    { key: 'masterDetails', label: 'Master Details', path: '/examine/master-details', icon: Layers },
     { key: 'patientHistory', label: 'Patient History', path: '/examine/history', icon: History },
   ] },
   { group: 'Billing', icon: Receipt, tone: 'rose', items: [
     { key: 'billing', label: 'Billing', path: '/billing', icon: Receipt },
+  ] },
+  { group: 'Report', icon: BarChart3, tone: 'amber', items: [
+    { key: 'collectionReport', label: 'Reports', path: '/report/collection', icon: IndianRupee },
   ] },
   { group: 'Configuration', icon: Settings, tone: 'slate', items: [
     { key: 'clinic', label: 'Clinic Master', path: '/config/clinic', icon: Building2 },

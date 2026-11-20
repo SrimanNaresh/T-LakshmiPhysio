@@ -17,8 +17,10 @@ import ConfirmList from './pages/booking/ConfirmList';
 import FollowUp from './pages/booking/FollowUp';
 import ExamineQueue from './pages/examine/ExamineQueue';
 import TreatmentMaster from './pages/examine/TreatmentMaster';
+import MasterDetails from './pages/examine/MasterDetails';
 import PatientHistory from './pages/examine/PatientHistory';
 import Billing from './pages/billing/Billing';
+import CollectionReport from './pages/report/CollectionReport';
 
 function Guard({ k, children }) {
   const { screens } = useAuth();
@@ -45,8 +47,10 @@ const ROUTES = [
   ['booking/follow-up', 'followUp', FollowUp],
   ['examine/queue', 'examine', ExamineQueue],
   ['examine/treatments', 'treatmentMaster', TreatmentMaster],
+  ['examine/master-details', 'masterDetails', MasterDetails],
   ['examine/history', 'patientHistory', PatientHistory],
   ['billing', 'billing', Billing],
+  ['report/collection', 'collectionReport', CollectionReport],
 ];
 
 export default function App() {

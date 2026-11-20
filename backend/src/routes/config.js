@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { query, h, bad, nz, withTransaction } from '../db/query.js';
 import { hashPassword } from '../utils/password.js';
+import { waNumber } from './whatsapp.js';
 
 const router = Router();
 
@@ -21,14 +22,20 @@ router.put('/clinic', h(async (req, res) => {
   const p = {
     n: b.ClinicName.trim(), d: nz(b.DoctorName), e: nz(b.EmailId), c: nz(b.ContactNo),
     a: nz(b.Address), l: nz(b.Logo), app: nz(b.AppName),
+    wn: b.WhatsAppNo ? waNumber(b.WhatsAppNo) : null,
+    wo: ['Clinic', 'Doctor'].includes(b.WhatsAppOwner) ? b.WhatsAppOwner : 'Clinic',
   };
-  const [row] = await query('SELECT TOP 1 ClinicId FROM ClinicMaster ORDER BY ClinicId');
+  if (p.wn && p.wn.length < 11) throw bad('Enter a valid WhatsApp number (10-digit mobile, or with country code)');
+  const [row] = await query('SELECT TOP 1 ClinicId, WhatsAppNo FROM ClinicMaster ORDER BY ClinicId');
   if (row) {
+    // A new number has to be verified again.
     await query(`UPDATE ClinicMaster SET ClinicName=@n, DoctorName=@d, EmailId=@e, ContactNo=@c,
-      Address=@a, Logo=@l, AppName=@app, UpdatedAt=GETDATE() WHERE ClinicId=@id`, { ...p, id: row.ClinicId });
+      Address=@a, Logo=@l, AppName=@app, WhatsAppNo=@wn, WhatsAppOwner=@wo,
+      WhatsAppVerifiedAt=CASE WHEN ISNULL(WhatsAppNo,'')=ISNULL(@wn,'') THEN WhatsAppVerifiedAt END,
+      UpdatedAt=GETDATE() WHERE ClinicId=@id`, { ...p, id: row.ClinicId });
   } else {
-    await query(`INSERT INTO ClinicMaster (ClinicName, DoctorName, EmailId, ContactNo, Address, Logo, AppName)
-      VALUES (@n,@d,@e,@c,@a,@l,@app)`, p);
+    await query(`INSERT INTO ClinicMaster (ClinicName, DoctorName, EmailId, ContactNo, Address, Logo, AppName, WhatsAppNo, WhatsAppOwner)
+      VALUES (@n,@d,@e,@c,@a,@l,@app,@wn,@wo)`, p);
   }
   res.json({ ok: true });
 }));

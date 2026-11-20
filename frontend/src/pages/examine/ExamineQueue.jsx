@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Search, Save, Trash2, ArrowLeft, History, ChevronDown, Check, X, Plus, Dumbbell, CalendarDays } from 'lucide-react';
+import { Search, Save, Trash2, ArrowLeft, History, ChevronDown, Check, X, Plus, CalendarDays, Layers, LayoutGrid, List } from 'lucide-react';
 import api, { errMsg } from '../../lib/api';
 import { fDate, fTime, today, addDays, money } from '../../lib/fmt';
 import { BodyChartPanel, SkeletonIcon, mergeBodyChart, parseBodyChart } from '../../components/BodyChart';
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, STATUS_COLOR, Table, Textarea, useToast } from '../../components/ui';
 import { VisitTimeline } from './PatientHistory';
 import CreatableSelect from '../../components/CreatableSelect';
+import MasterDetailViewer from '../../components/MasterDetailViewer';
+import PatientImageNotes from '../../components/PatientImageNotes';
 
 // Drop-down with a tick box per treatment: several can be chosen at once. selected = TreatmentIds.
 function TreatmentMultiSelect({ masters, selected, onToggle, onClear }) {
@@ -182,7 +184,12 @@ function ExamineForm({ booking, onBack, onSaved }) {
   const changePlan = (p) => { planTouched.current = true; setPlan(p); };
   const [items, setItems] = useState([]);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState('chart'); // 'chart' | 'notes' | 'treatment' | 'followup'
+  // How the selected treatments are shown: 'card' (side by side) or 'list' (one row each). Remembered per browser.
+  const [itemView, setItemViewState] = useState(() => {
+    try { return localStorage.getItem('examine.itemView') === 'list' ? 'list' : 'card'; } catch { return 'card'; }
+  });
+  const setItemView = (v) => { setItemViewState(v); try { localStorage.setItem('examine.itemView', v); } catch { /* ignore */ } };
+  const [tab, setTab] = useState('chart'); // 'chart' | 'notes' | 'master' | 'treatment' (fees + follow-up)
   const [bodyNotes, setBodyNotes] = useState({});
   // An examined patient opens their saved assessment for editing; a waiting patient starts a new one.
   const editing = booking.Status === 'Examined';
@@ -249,6 +256,7 @@ function ExamineForm({ booking, onBack, onSaved }) {
       )} />
       <Modal open={showHistory} width="max-w-4xl" onClose={() => setShowHistory(false)}
         title={`Patient History — ${booking.PatientName} (${booking.PatientCode}) · ${history.length} earlier ${history.length === 1 ? 'visit' : 'visits'}`}>
+        <PatientImageNotes patientId={booking.PatientId} />
         <VisitTimeline visits={history} />
       </Modal>
       {/* Patient details on one line (wraps only on narrow screens). */}
@@ -274,8 +282,8 @@ function ExamineForm({ booking, onBack, onSaved }) {
               {[
                 ['chart', 'Body Chart', SkeletonIcon, chartCount],
                 ['notes', 'Assessment Notes', null, 0],
-                ['treatment', 'Treatment & Fees', Dumbbell, items.length],
-                ['followup', 'Follow-up', CalendarDays, plan.dates.length],
+                ['master', 'Exercise / Modality', Layers, 0],
+                ['treatment', 'Fees & Follow-up', CalendarDays, plan.dates.length],
               ].map(([id, label, Icon, count]) => (
                 <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)}
                   className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-sm font-semibold transition-colors ${tab === id ? 'border-brand-600 text-brand-700' : 'border-transparent text-ink-500 hover:text-ink-800'}`}>
@@ -294,7 +302,8 @@ function ExamineForm({ booking, onBack, onSaved }) {
                 placeholder="Chief complaint, history, pain scale, ROM, special tests, diagnosis, plan…" />
             </>
           )}
-          {tab === 'followup' && <FollowUpPlanner plan={plan} setPlan={changePlan} />}
+          {/* Kept mounted so the chosen type and title stay when switching tabs. */}
+          <div className={tab === 'master' ? '' : 'hidden'}><MasterDetailViewer patientId={booking.PatientId} patientName={booking.PatientName} mobileNo={booking.MobileNo} /></div>
           {tab === 'treatment' && (
             <>
               <div className="grid items-end gap-x-4 gap-y-3 md:grid-cols-[minmax(0,1fr)_150px_auto]">
@@ -309,9 +318,62 @@ function ExamineForm({ booking, onBack, onSaved }) {
                 </div>
               </div>
               {items.length > 0 && (
+                <div className="mt-3 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-ink-500">Selected treatments ({items.length})</span>
+                  <div className="inline-flex rounded-lg border border-ink-200 bg-white p-0.5" role="group" aria-label="Treatment view">
+                    {[['card', 'Card view', LayoutGrid], ['list', 'List view', List]].map(([v, label, Icon]) => (
+                      <button key={v} type="button" aria-pressed={itemView === v} title={label} onClick={() => setItemView(v)}
+                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium ${itemView === v ? 'bg-brand-600 text-white' : 'text-ink-500 hover:bg-ink-50 hover:text-ink-800'}`}>
+                        <Icon size={14} /> {v === 'card' ? 'Cards' : 'List'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {items.length > 0 && itemView === 'list' && (
+                // One row per treatment: name, exercise, fee, remove.
+                <div className="mt-2 overflow-x-auto rounded-lg border border-ink-200 bg-white">
+                  <table className="w-full text-sm">
+                    <thead className="bg-ink-50 text-left text-xs text-ink-500">
+                      <tr>
+                        <th className="w-10 px-2 py-1.5 font-semibold">#</th>
+                        <th className="px-2 py-1.5 font-semibold">Treatment</th>
+                        <th className="px-2 py-1.5 font-semibold">Exercise / instructions</th>
+                        <th className="w-[100px] px-2 py-1.5 font-semibold">Fee (₹)</th>
+                        <th className="w-10 px-2 py-1.5"><span className="sr-only">Remove</span></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {items.map((x, i) => (
+                        <tr key={x.TreatmentId ?? i} className="border-t border-ink-100">
+                          <td className="px-2 py-1 text-ink-400">{i + 1}</td>
+                          <td className="max-w-[220px] truncate px-2 py-1 font-semibold text-ink-800" title={x.TreatmentName}>{x.TreatmentName}</td>
+                          <td className="min-w-[200px] px-2 py-1">
+                            <Input value={x.Exercise} onChange={(e) => upd(i, 'Exercise', e.target.value)} placeholder="Exercise / instructions" aria-label={`${x.TreatmentName} exercise`} />
+                          </td>
+                          <td className="px-2 py-1">
+                            <Input type="number" min="0" value={x.Fee} onChange={(e) => upd(i, 'Fee', e.target.value)} className="!w-[88px]" aria-label={`${x.TreatmentName} fee (₹)`} />
+                          </td>
+                          <td className="px-2 py-1">
+                            <button type="button" aria-label={`Remove ${x.TreatmentName}`} onClick={() => setItems(items.filter((_, j) => j !== i))}
+                              className="grid h-6 w-6 place-items-center rounded text-ink-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={14} /></button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t border-ink-200 bg-ink-50 text-sm">
+                        <td colSpan={3} className="px-2 py-1.5 text-right font-semibold text-ink-600">Treatment total</td>
+                        <td colSpan={2} className="px-2 py-1.5 font-semibold text-ink-800">{money(tFee)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+              {items.length > 0 && itemView === 'card' && (
                 // Selected treatments side by side on one line: a small card each (name, exercise, fee, remove).
                 // As many as fit go on a line; more wrap to the next.
-                <div className="mt-3 grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(230px,1fr))]">
+                <div className="mt-2 grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(230px,1fr))]">
                   {items.map((x, i) => (
                     <div key={x.TreatmentId ?? i} className="rounded-lg border border-ink-200 bg-white p-2">
                       <div className="mb-1 flex items-center justify-between gap-1">
@@ -327,6 +389,14 @@ function ExamineForm({ booking, onBack, onSaved }) {
                   ))}
                 </div>
               )}
+              {/* Follow-up lives in the same tab as the fees. */}
+              <div className="mt-4 border-t border-ink-100 pt-3">
+                <h4 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink-700">
+                  <CalendarDays size={15} className="text-brand-600" /> Follow-up
+                  {plan.dates.length > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[10px] leading-4 text-white">{plan.dates.length}</span>}
+                </h4>
+                <FollowUpPlanner plan={plan} setPlan={changePlan} />
+              </div>
             </>
           )}
         </div>
