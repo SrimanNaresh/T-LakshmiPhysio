@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query, h, bad } from '../db/query.js';
 import * as wa from '../services/whatsapp.js';
+import { loadBill, billPdf, fDateTime, money } from '../services/billPdf.js';
 
 const router = Router();
 
@@ -85,6 +86,26 @@ router.post('/whatsapp/send-exercises', h(async (req, res) => {
   try {
     const out = await wa.send(number, String(b.Text || ''), images);
     res.json({ ...out, number, images: images.length });
+  } catch (e) { throw bad(e.message, e.status || 500); }
+}));
+
+// Bill receipt as a PDF document, with a short caption, to the bill's patient.
+router.post('/whatsapp/send-bill', h(async (req, res) => {
+  const bill = await loadBill(Number(req.body?.BillId));
+  if (!bill) throw bad('Bill not found', 404);
+  const number = await patientNumber(bill.PatientId);
+  await requireSender();
+  const [clinic] = await query('SELECT TOP 1 * FROM ClinicMaster ORDER BY ClinicId');
+  const c = clinic || {};
+  const caption = [
+    `Hello ${bill.PatientName}, thank you for visiting ${c.ClinicName || 'Lakshmi Physio'}.`,
+    `Your bill ${bill.BillNo} (${fDateTime(bill.BillDate)}) for ${money(bill.NetAmount)} is attached.`,
+    c.ContactNo ? `For queries call ${c.ContactNo}.` : '',
+  ].filter(Boolean).join('\n');
+  try {
+    const pdf = await billPdf(bill, c);
+    const out = await wa.send(number, '', [{ dataUrl: `data:application/pdf;base64,${pdf.toString('base64')}`, name: `Bill-${bill.BillNo}.pdf`, caption }]);
+    res.json({ ...out, number, billNo: bill.BillNo });
   } catch (e) { throw bad(e.message, e.status || 500); }
 }));
 

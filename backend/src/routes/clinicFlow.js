@@ -1,6 +1,7 @@
 // Booking / Walk-in, Examine, Treatment master, Patient History, Billing, Dashboard
 import { Router } from 'express';
 import { query, h, bad, nz, num, withTransaction } from '../db/query.js';
+import { loadBill } from '../services/billPdf.js';
 
 const router = Router();
 
@@ -325,16 +326,8 @@ router.get('/bills', h(async (req, res) => {
 }));
 
 router.get('/bills/:id', h(async (req, res) => {
-  const [bill] = await query(`
-    SELECT bl.*, p.PatientCode, p.Name AS PatientName, p.MobileNo, p.Age, p.Gender, p.Address,
-           e.Name AS DoctorName
-    FROM Bill bl JOIN Patient p ON p.PatientId=bl.PatientId
-    LEFT JOIN Visit v ON v.VisitId=bl.VisitId
-    LEFT JOIN Employee e ON e.EmployeeId=v.DoctorId
-    WHERE bl.BillId=@id`, { id: Number(req.params.id) });
+  const bill = await loadBill(req.params.id);
   if (!bill) throw bad('Bill not found', 404);
-  bill.treatments = bill.VisitId
-    ? await query('SELECT TreatmentName, Fee FROM VisitTreatment WHERE VisitId=@v', { v: bill.VisitId }) : [];
   res.json(bill);
 }));
 

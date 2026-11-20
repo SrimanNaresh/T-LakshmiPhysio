@@ -202,3 +202,19 @@ export async function send(number, text, images = []) {
   return { sent: 1 + images.length };
 }
 
+// Print an HTML page to PDF in a new tab of the WhatsApp Chrome (no extra PDF library or browser).
+// Only used just before sending on WhatsApp, so it needs the link-up running.
+export async function pdfFromHtml(html) {
+  const browser = client?.pupBrowser;
+  if (S.state !== 'ready' || !browser) {
+    const e = new Error('WhatsApp is not connected. Scan the QR code first.'); e.status = 409; throw e;
+  }
+  const page = await browser.newPage();
+  try {
+    await page.setContent(html, { waitUntil: 'load', timeout: 20000 });
+    return Buffer.from(await page.pdf({ preferCSSPageSize: true, printBackground: true }));
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+

@@ -8,28 +8,6 @@ import { WhatsAppIcon, waNumber } from '../../lib/whatsapp';
 
 const hasWa = (mobile) => waNumber(mobile).length >= 11;
 
-// Bill details as WhatsApp text (the receipt in words).
-function billMessage(bill, clinic) {
-  const L = [
-    `Hello ${bill.PatientName}, thank you for visiting ${clinic?.ClinicName || 'Lakshmi Physiotherapy'}.`,
-    '', '*Bill details*',
-    `Bill No: ${bill.BillNo}`,
-    `Date: ${fDateTime(bill.BillDate)}`,
-    `Patient ID: ${bill.PatientCode}`,
-  ];
-  if (bill.DoctorName) L.push(`Doctor: ${bill.DoctorName}`);
-  L.push('', `Doctor Fee: ${money(bill.DoctorFee)}`);
-  if (bill.treatments?.length) {
-    L.push('Treatments:');
-    bill.treatments.forEach((t) => L.push(`  • ${t.TreatmentName}: ${money(t.Fee)}`));
-  }
-  L.push(`Treatment Fee: ${money(bill.TreatmentFee)}`);
-  if (Number(bill.Discount) > 0) L.push(`Discount: - ${money(bill.Discount)}`);
-  L.push(`*Net Amount: ${money(bill.NetAmount)}*`, `Paid by: ${bill.PaymentMode}`, '', 'Get well soon!');
-  if (clinic?.ContactNo) L.push(`For queries call ${clinic.ContactNo}.`);
-  return L.join('\n');
-}
-
 const waBtn = 'inline-flex items-center gap-2 rounded-lg bg-[#25D366] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1ebe5b]';
 
 function BillPrint({ bill, clinic }) {
@@ -128,16 +106,16 @@ export default function Billing() {
   useEffect(() => { loadPending(); loadBills(); api.get('/clinic').then((r) => setFullClinic(r.data)).catch(() => {}); }, []);
 
   const openPrint = async (id) => setPrint((await api.get(`/bills/${id}`)).data);
-  // Send the bill details straight from the clinic's linked WhatsApp (no WhatsApp Web tab). The server
-  // takes the number from the patient record and sends only from the verified Clinic Master number.
+  // Send the bill as a PDF receipt straight from the clinic's linked WhatsApp (no WhatsApp Web tab).
+  // The server makes the PDF, takes the number from the patient record and sends only from the
+  // verified Clinic Master number.
   const [sendingId, setSendingId] = useState(null);
   const sendWa = async (row) => {
     if (sendingId) return;
     setSendingId(row.BillId);
     try {
-      const bill = row.treatments ? row : (await api.get(`/bills/${row.BillId}`)).data;
-      await api.post('/whatsapp/send', { PatientId: bill.PatientId, Text: billMessage(bill, fullClinic) });
-      toast(`Bill ${bill.BillNo} sent to ${bill.PatientName} on WhatsApp`);
+      await api.post('/whatsapp/send-bill', { BillId: row.BillId });
+      toast(`Bill ${row.BillNo} (PDF) sent to ${row.PatientName} on WhatsApp`);
     } catch (e) { toast(errMsg(e), 'error'); } finally { setSendingId(null); }
   };
 
