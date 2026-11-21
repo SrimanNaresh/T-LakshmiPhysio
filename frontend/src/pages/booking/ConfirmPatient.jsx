@@ -31,7 +31,8 @@ export default function ConfirmPatient() {
   const reset = () => { setSel(null); setRows(null); setQ({ name: '', mobile: '' }); setParams({}); };
 
   return (
-    <div className="w-full">
+    // form-compact: smaller text throughout this screen, same as the Patient Assessment form.
+    <div className="form-compact w-full">
       <PageHeader title="Confirm Patient" subtitle="Search the patient list, select the patient and confirm the visit" />
       <Card className="mb-4">
         <form onSubmit={search} className="grid items-end gap-3 sm:grid-cols-[1fr_1fr_auto]">
@@ -43,11 +44,12 @@ export default function ConfirmPatient() {
 
       {sel ? (
         <Card title="Confirm Visit" actions={<Button size="sm" variant="ghost" icon={X} onClick={reset}>Change patient</Button>}>
-          <div className="mb-5 grid gap-3 rounded-lg bg-brand-50 p-4 text-sm sm:grid-cols-4">
-            <div><div className="text-xs text-ink-500">Patient ID</div><div className="font-mono font-semibold text-brand-800">{sel.PatientCode}</div></div>
-            <div><div className="text-xs text-ink-500">Name</div><div className="font-medium">{sel.Name}</div></div>
-            <div><div className="text-xs text-ink-500">Mobile No</div><div>{sel.MobileNo || '—'}</div></div>
-            <div><div className="text-xs text-ink-500">Age</div><div>{sel.Age ?? '—'}</div></div>
+          {/* Patient details in one compact line (label: value), wrapping only on narrow screens. */}
+          <div className="mb-4 flex flex-wrap items-baseline gap-x-6 gap-y-1 rounded-lg bg-brand-50 px-4 py-1.5 text-sm leading-tight">
+            <span><span className="text-xs text-ink-500">Patient ID: </span><span className="font-mono font-semibold text-brand-800">{sel.PatientCode}</span></span>
+            <span><span className="text-xs text-ink-500">Name: </span><span className="font-medium">{sel.Name}</span></span>
+            <span><span className="text-xs text-ink-500">Mobile No: </span>{sel.MobileNo || '—'}</span>
+            <span><span className="text-xs text-ink-500">Age: </span>{sel.Age ?? '—'}</span>
           </div>
           <ConfirmForm patient={sel} onDone={() => (canSee(screens, 'confirmList') ? nav('/booking/list') : reset())} />
         </Card>

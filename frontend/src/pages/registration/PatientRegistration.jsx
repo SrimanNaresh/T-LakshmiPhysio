@@ -50,15 +50,16 @@ export default function PatientRegistration() {
         </div>
       )}
       <Card>
-        <form onSubmit={save} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Every field the same width: three equal columns, two even rows; Address spans the full width. */}
+        <form onSubmit={save} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Patient ID"><Input disabled className="font-mono font-semibold !text-brand-700" value={f.PatientCode || nextCode || 'Auto generated'} /></Field>
-          <Field label="Name" required className="sm:col-span-2"><Input autoFocus value={f.Name} onChange={set('Name')} /></Field>
+          <Field label="Name" required><Input autoFocus value={f.Name} onChange={set('Name')} /></Field>
           <Field label="Mobile No"><Input inputMode="numeric" maxLength={10} value={f.MobileNo || ''} onChange={(e) => setF({ ...f, MobileNo: e.target.value.replace(/\D/g, '') })} /></Field>
           <Field label="Age"><Input type="number" min="0" max="120" value={f.Age ?? ''} onChange={set('Age')} /></Field>
           <Field label="Gender">
             <Select value={f.Gender || ''} onChange={set('Gender')}><option value="">—</option><option>Male</option><option>Female</option><option>Other</option></Select>
           </Field>
-          <Field label="Referral" className="sm:col-span-2"><Input value={f.Referral || ''} onChange={set('Referral')} placeholder="Referred by (doctor / person / source)" /></Field>
+          <Field label="Referral"><Input value={f.Referral || ''} onChange={set('Referral')} placeholder="Referred by (doctor / person / source)" /></Field>
           <Field label="Address" className="sm:col-span-full"><Textarea rows={2} value={f.Address || ''} onChange={set('Address')} /></Field>
           <div className="flex justify-end gap-2 sm:col-span-full">
             <Button type="button" variant="secondary" icon={RotateCcw} onClick={() => (f.PatientId ? nav('/registration/patient') : setF(blank))}>{f.PatientId ? 'New' : 'Clear'}</Button>

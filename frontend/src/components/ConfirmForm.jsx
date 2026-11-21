@@ -31,14 +31,15 @@ export default function ConfirmForm({ patient, defaultType = 'Walk-in', defaultT
   };
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
+    // Type, Confirm Time and Doctor on one line; Notes and the button below (stacks on phones).
+    <div className="grid gap-4 sm:grid-cols-3">
       <Field label="Type">
         <Select value={f.BookingType} onChange={(e) => setF({ ...f, BookingType: e.target.value })}>
           <option>Walk-in</option><option>Booking</option><option>Follow-up</option>
         </Select>
       </Field>
       <Field label="Confirm Time"><Input type="datetime-local" value={f.ConfirmTime} onChange={(e) => setF({ ...f, ConfirmTime: e.target.value })} /></Field>
-      <Field label="Doctor" className="sm:col-span-2">
+      <Field label="Doctor">
         <Select value={f.DoctorId} onChange={(e) => setF({ ...f, DoctorId: e.target.value })}>
           <option value="">— Any doctor —</option>
           {doctors.map((d) => {
@@ -51,8 +52,8 @@ export default function ConfirmForm({ patient, defaultType = 'Walk-in', defaultT
           })}
         </Select>
       </Field>
-      <Field label="Notes" className="sm:col-span-2"><Textarea rows={2} value={f.Notes} onChange={(e) => setF({ ...f, Notes: e.target.value })} placeholder="Complaint / reason for visit (optional)" /></Field>
-      <div className="flex justify-end sm:col-span-2"><Button icon={CheckCircle2} loading={busy} onClick={save}>Confirm</Button></div>
+      <Field label="Notes" className="sm:col-span-3"><Textarea rows={2} value={f.Notes} onChange={(e) => setF({ ...f, Notes: e.target.value })} placeholder="Complaint / reason for visit (optional)" /></Field>
+      <div className="flex justify-end sm:col-span-3"><Button icon={CheckCircle2} loading={busy} onClick={save}>Confirm</Button></div>
     </div>
   );
 }
